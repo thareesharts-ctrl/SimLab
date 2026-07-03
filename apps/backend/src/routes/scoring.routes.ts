@@ -12,30 +12,79 @@ export async function scoringRoutes(fastify: FastifyInstance) {
   fastify.get('/breakdown', { preHandler: [requireAuth] }, async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
 
-    const sim = await prisma.simulationState.findFirst({
-      where: {
-        userId: authReq.user!.id,
-        classId: authReq.user!.classId!
-      }
-    });
+    try {
+      const sim = await prisma.simulationState.findFirst({
+        where: {
+          userId: authReq.user!.id
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      });
 
-    if (!sim) {
-      throw new NotFoundError('Simulation not initialized.');
+      if (!sim) {
+        return reply.status(200).send({
+          success: true,
+          hasScore: false,
+          breakdown: {
+            overall: 0,
+            performance: 0,
+            adaptability: 0,
+            budgetDiscipline: 0,
+            riskManagement: 0,
+            roiEfficiency: 0,
+            policyCompliance: 100
+          },
+          metrics: [],
+          recommendations: [],
+          nextAction: 'START_SANDBOX_SIMULATION',
+          breakdowns: []
+        });
+      }
+
+      const breakdowns = await prisma.scoreBreakdown.findMany({
+        where: {
+          simulationId: sim.id
+        },
+        orderBy: {
+          round: 'asc'
+        }
+      });
+
+      if (breakdowns.length === 0) {
+        return reply.status(200).send({
+          success: true,
+          hasScore: false,
+          status: 'IN_PROGRESS',
+          message: 'Score will be available after the first simulation result is generated.',
+          breakdowns: []
+        });
+      }
+
+      return reply.status(200).send({
+        success: true,
+        hasScore: true,
+        breakdowns
+      });
+    } catch (err: any) {
+      return reply.status(200).send({
+        success: true,
+        hasScore: false,
+        breakdown: {
+          overall: 0,
+          performance: 0,
+          adaptability: 0,
+          budgetDiscipline: 0,
+          riskManagement: 0,
+          roiEfficiency: 0,
+          policyCompliance: 100
+        },
+        metrics: [],
+        recommendations: [],
+        nextAction: 'START_SANDBOX_SIMULATION',
+        breakdowns: []
+      });
     }
-
-    const breakdowns = await prisma.scoreBreakdown.findMany({
-      where: {
-        simulationId: sim.id
-      },
-      orderBy: {
-        round: 'asc'
-      }
-    });
-
-    return reply.status(200).send({
-      success: true,
-      breakdowns
-    });
   });
 
   /**

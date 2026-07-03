@@ -215,7 +215,7 @@ describe('Screenshots Flow and Multi-Day Ads Simulation Verification', () => {
         biddingStrategy: 'Maximize Conversions', // More advanced bid strategy
         budget: 3200.0, // Increased but within budgetPerRound ($5000 total for all channels)
         keywords: [
-          { word: 'CRM SaaS', bid: 3.50, matchType: 'exact' } // Higher bid & exact match
+          { word: 'CRM SaaS', bid: 3.50, matchType: 'broad' } // Higher bid & broad match
         ],
         negativeKeywords: ['free', 'cheap', 'crack'], // Filtering wasted spend
         devices: { desktop: true, mobile: true, tablet: true },

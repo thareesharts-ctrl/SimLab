@@ -33,6 +33,8 @@ export function DashboardPage() {
   const [subscription, setSubscription] = useState<any>(null)
   const [eligibility, setEligibility] = useState<any>(null)
   const [bestRoi, setBestRoi] = useState<number>(0)
+  const [hasScore, setHasScore] = useState<boolean>(false)
+  const [scoringError, setScoringError] = useState<boolean>(false)
   const [activeAssignment, setActiveAssignment] = useState<any>(null)
   const [classStandings, setClassStandings] = useState<any>(null)
   const [dashboardLoading, setDashboardLoading] = useState(false)
@@ -47,56 +49,69 @@ export function DashboardPage() {
   }, [user, navigate])
 
   // Fetch role-specific details
-  useEffect(() => {
-    async function fetchDashboardData() {
-      if (!user) return
-      setDashboardLoading(true)
-      try {
-        // Active simulation is shared
-        const simRes = await api.get("/api/simulations")
-        if (simRes.data && simRes.data.length > 0) {
-          setActiveSimulation(simRes.data[0])
-        }
-
-        if (user.role === "individual") {
-          // Fetch subscription
-          const subRes = await api.get("/api/v1/billing/subscription").catch(() => null)
-          if (subRes && subRes.data?.success) {
-            setSubscription(subRes.data.subscription)
-          }
-
-          // Fetch eligibility checklist
-          const eligRes = await api.post("/api/certificates/check-eligibility").catch(() => null)
-          if (eligRes && eligRes.data?.success) {
-            setEligibility(eligRes.data)
-          }
-
-          // Fetch score breakdown for best ROI
-          const bRes = await api.get("/api/v1/scoring/breakdown").catch(() => null)
-          if (bRes && bRes.data?.success && bRes.data.breakdowns?.length > 0) {
-            const rois = bRes.data.breakdowns.map((b: any) => b.efficiencyRoi || 0)
-            setBestRoi(Math.max(...rois, 0))
-          }
-        } else if (user.role === "student-college") {
-          // Fetch active assignment
-          const assignRes = await api.get("/api/v1/assignments/student/active").catch(() => null)
-          if (assignRes && assignRes.data?.success) {
-            setActiveAssignment(assignRes.data.activeAssignment)
-          }
-
-          // Fetch class standings
-          const lbRes = await api.get("/api/v1/scoring/leaderboard").catch(() => null)
-          if (lbRes && lbRes.data?.success) {
-            setClassStandings(lbRes.data)
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load dashboard statistics:", err)
-      } finally {
-        setDashboardLoading(false)
+  const fetchDashboardData = async () => {
+    if (!user) return
+    setDashboardLoading(true)
+    try {
+      // Active simulation is shared
+      const simRes = await api.get("/api/simulations")
+      if (simRes.data && simRes.data.length > 0) {
+        setActiveSimulation(simRes.data[0])
       }
-    }
 
+      if (user.role === "individual") {
+        // Fetch subscription
+        const subRes = await api.get("/api/v1/billing/subscription").catch(() => null)
+        if (subRes && subRes.data?.success) {
+          setSubscription(subRes.data.subscription)
+        }
+
+        // Fetch eligibility checklist
+        const eligRes = await api.post("/api/certificates/check-eligibility").catch(() => null)
+        if (eligRes && eligRes.data?.success) {
+          setEligibility(eligRes.data)
+        }
+
+        // Fetch score breakdown for best ROI
+        setScoringError(false)
+        try {
+          const bRes = await api.get("/api/v1/scoring/breakdown")
+          if (bRes && bRes.data?.success) {
+            setHasScore(!!bRes.data.hasScore)
+            if (bRes.data.breakdowns?.length > 0) {
+              const rois = bRes.data.breakdowns.map((b: any) => b.efficiencyRoi || 0)
+              setBestRoi(Math.max(...rois, 0))
+            }
+          } else {
+            setHasScore(false)
+          }
+        } catch (err: any) {
+          if (!err.response) {
+            setScoringError(true)
+          }
+          setHasScore(false)
+        }
+      } else if (user.role === "student-college") {
+        // Fetch active assignment
+        const assignRes = await api.get("/api/v1/assignments/student/active").catch(() => null)
+        if (assignRes && assignRes.data?.success) {
+          setActiveAssignment(assignRes.data.activeAssignment)
+        }
+
+        // Fetch class standings
+        const lbRes = await api.get("/api/v1/scoring/leaderboard").catch(() => null)
+        if (lbRes && lbRes.data?.success) {
+          setClassStandings(lbRes.data)
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load dashboard statistics:", err)
+    } finally {
+      setDashboardLoading(false)
+    }
+  }
+
+  useEffect(() => {
     if (user?.role === "student-college" || user?.role === "individual") {
       fetchDashboardData()
     }
@@ -301,26 +316,46 @@ export function DashboardPage() {
                   </div>
 
                   {activeSimulation ? (
-                    <div className="p-4 rounded-xl border border-neutral-205 bg-neutral-50 space-y-3 mt-4">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-neutral-400 font-bold">SIMULATION SESSION</span>
-                        <Badge className="bg-indigo-600 text-white text-[9px] font-bold">INITIALIZED</Badge>
+                    scoringError ? (
+                      <div className="p-4 rounded-xl border border-red-200 bg-red-50/50 text-center py-4 mt-4 space-y-2">
+                        <p className="text-xs text-red-700 font-bold">Failed to load scores due to network error.</p>
+                        <Button
+                          onClick={fetchDashboardData}
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-[10px] font-black border-red-200 text-red-700 bg-white hover:bg-red-50"
+                        >
+                          Retry Connection
+                        </Button>
                       </div>
-                      <div className="grid grid-cols-4 gap-4 pt-1">
-                        <div>
-                          <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block">Round</span>
-                          <span className="text-sm font-extrabold text-neutral-900 block mt-0.5">Round {activeSimulation.currentRound || 1}</span>
+                    ) : !hasScore ? (
+                      <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50/70 text-center py-5 mt-4">
+                        <p className="text-xs text-neutral-500 font-bold">
+                          No score yet. Start a sandbox simulation to generate your first score.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-xl border border-neutral-205 bg-neutral-50 space-y-3 mt-4">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-neutral-400 font-bold">SIMULATION SESSION</span>
+                          <Badge className="bg-indigo-600 text-white text-[9px] font-bold">INITIALIZED</Badge>
                         </div>
-                        <div>
-                          <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block">Score</span>
-                          <span className="text-sm font-extrabold text-neutral-900 block mt-0.5">{(activeSimulation.score || 0).toFixed(1)}%</span>
-                        </div>
-                        <div className="col-span-2">
-                          <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block">Best ROI Score</span>
-                          <span className="text-sm font-extrabold text-indigo-650 block mt-0.5">{bestRoi > 0 ? `${bestRoi.toFixed(1)}%` : "N/A"}</span>
+                        <div className="grid grid-cols-4 gap-4 pt-1">
+                          <div>
+                            <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block">Round</span>
+                            <span className="text-sm font-extrabold text-neutral-900 block mt-0.5">Round {activeSimulation.currentRound || 1}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block">Score</span>
+                            <span className="text-sm font-extrabold text-neutral-900 block mt-0.5">{(activeSimulation.score || 0).toFixed(1)}%</span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block">Best ROI Score</span>
+                            <span className="text-sm font-extrabold text-indigo-650 block mt-0.5">{bestRoi > 0 ? `${bestRoi.toFixed(1)}%` : "N/A"}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )
                   ) : (
                     <div className="p-4 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 text-center py-6 mt-4">
                       <p className="text-xs text-neutral-400 font-bold">No active simulation session initialized.</p>
