@@ -68,6 +68,10 @@ export async function metaAdsRoutes(fastify: FastifyInstance) {
       throw new NotFoundError('Simulation not initialized.');
     }
 
+    if (sim.simulationMode && sim.simulationMode !== 'META_ADS') {
+      throw new ValidationError(`This class simulation is restricted to ${sim.simulationMode}. You cannot submit Meta Ads decisions.`);
+    }
+
     if (sim.status !== 'DECISION_OPEN') {
       await prisma.hardViolation.create({
         data: {

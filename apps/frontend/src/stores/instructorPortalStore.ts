@@ -272,12 +272,17 @@ export const useInstructorPortalStore = create<InstructorPortalState>((set, get)
       console.error("Failed to fetch class details:", err)
     }
   },
-
-  createClass: async (name, scenarioId, _maxStudents, _deadline) => {
+  
+  createClass: async (name, scenarioId, semester, batch, department, subject, college) => {
     try {
-      const res = await api.post<{ success: boolean; class: any }>('/api/v1/class', {
+      const res = await api.post<{ success: boolean; class: any }>('/api/instructor/classes', {
         name,
         scenarioId,
+        semester,
+        batch,
+        department,
+        subject,
+        college,
       })
       await get().fetchClasses()
       return res.data
@@ -286,6 +291,8 @@ export const useInstructorPortalStore = create<InstructorPortalState>((set, get)
       throw err
     }
   },
+
+
 
   createCustomScenario: async (scenarioData) => {
     try {

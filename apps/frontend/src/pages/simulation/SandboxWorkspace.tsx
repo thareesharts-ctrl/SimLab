@@ -228,6 +228,13 @@ export function SandboxWorkspace() {
       if (res.data?.success && res.data.hasState) {
         setState(res.data.state)
         setProgress(res.data.progress)
+
+        // Lock simulationMode if restricted
+        const correctMode = res.data.state.simulationMode;
+        if (correctMode && correctMode !== mode) {
+          navigate(`/sandbox/workspace?mode=${correctMode}`, { replace: true });
+          return;
+        }
         
         // Load report if round > 1 or completed
         if (res.data.state.currentRound > 1 || res.data.state.isCompleted || res.data.state.status === 'RESULTS_READY') {

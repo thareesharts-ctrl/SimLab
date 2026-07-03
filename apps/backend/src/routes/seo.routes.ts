@@ -67,6 +67,10 @@ export async function seoRoutes(fastify: FastifyInstance) {
       throw new NotFoundError('Simulation not initialized.');
     }
 
+    if (sim.simulationMode && sim.simulationMode !== 'SEO') {
+      throw new ValidationError(`This class simulation is restricted to ${sim.simulationMode}. You cannot submit SEO decisions.`);
+    }
+
     if (sim.status !== 'DECISION_OPEN') {
       await prisma.hardViolation.create({
         data: {

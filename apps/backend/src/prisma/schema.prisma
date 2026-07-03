@@ -687,6 +687,9 @@ model ScenarioAssignment {
   difficulty          String
   autoStart           Boolean                     @default(false)
   status              String                      @default("DRAFT") // DRAFT, SCHEDULED, ACTIVE, COMPLETED, CANCELLED
+  simulationMode      String?
+  roundDurationHours  Int?                        @default(24)
+  totalRounds         Int?
   createdAt           DateTime                    @default(now())
   updatedAt           DateTime                    @updatedAt
 

@@ -4,6 +4,9 @@ import { UserRole } from '../auth/roles';
 import { prisma } from '../db/client';
 import { z } from 'zod';
 import { ValidationError, NotFoundError, ForbiddenError } from '../utils/errors';
+import { createNotification, logActivity } from '../utils/audit';
+import { logger } from '../utils/logger';
+import { cacheService } from '../utils/caching';
 import { io } from '../websocket/server';
 import crypto from 'crypto';
 import { processSimulationRound } from '../services/simulation/engine';
@@ -22,7 +25,8 @@ export async function instructorRoutes(fastify: FastifyInstance) {
         batch: data.batch || 'N/A',
         department: data.department || 'N/A',
         college: data.college || 'N/A',
-        subject: data.subject || 'N/A'
+        subject: data.subject || 'N/A',
+        status: data.status || 'Active'
       };
     } catch {
       return {
@@ -31,7 +35,8 @@ export async function instructorRoutes(fastify: FastifyInstance) {
         batch: 'N/A',
         department: 'N/A',
         college: 'N/A',
-        subject: 'N/A'
+        subject: 'N/A',
+        status: 'Active'
       };
     }
   }
@@ -466,16 +471,110 @@ export async function instructorRoutes(fastify: FastifyInstance) {
   });
 
   /**
-   * POST /api/instructor/classes/:classId/approve-student
+   * GET /api/instructor/classes/:classId
    */
-  fastify.post('/classes/:classId/approve-student', async (request, reply) => {
+  fastify.get('/classes/:classId', async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
     const { classId } = request.params as { classId: string };
-    const { studentId } = request.body as { studentId: string };
 
+    const cls = await checkClassOwnership(classId, authReq.user!.id, authReq.user!.role);
+
+    // Fetch scenario and student counts
+    const fullClass = await prisma.class.findUnique({
+      where: { id: classId },
+      include: {
+        scenario: true,
+        _count: { select: { students: true } }
+      }
+    });
+
+    if (!fullClass) throw new NotFoundError('Class not found.');
+
+    const parsed = parseClassName(fullClass.name);
+    return reply.status(200).send({
+      success: true,
+      class: {
+        id: fullClass.id,
+        name: parsed.name,
+        semester: parsed.semester,
+        batch: parsed.batch,
+        department: parsed.department,
+        college: parsed.college,
+        subject: parsed.subject,
+        status: parsed.status || 'Active',
+        inviteCode: fullClass.inviteCode,
+        scenario: fullClass.scenario,
+        studentsCount: fullClass._count.students,
+        createdAt: fullClass.createdAt
+      }
+    });
+  });
+
+  /**
+   * POST /api/instructor/classes/:classId/archive
+   */
+  fastify.post('/classes/:classId/archive', async (request, reply) => {
+    const authReq = request as AuthenticatedRequest;
+    const { classId } = request.params as { classId: string };
+
+    const cls = await checkClassOwnership(classId, authReq.user!.id, authReq.user!.role);
+
+    const parsed = parseClassName(cls.name);
+    const updatedData = {
+      ...parsed,
+      status: 'Archived'
+    };
+
+    const updated = await prisma.class.update({
+      where: { id: classId },
+      data: { name: JSON.stringify(updatedData) }
+    });
+
+    return reply.status(200).send({
+      success: true,
+      message: 'Class archived successfully.',
+      class: {
+        id: updated.id,
+        name: updatedData.name,
+        status: 'Archived'
+      }
+    });
+  });
+
+  /**
+   * GET /api/instructor/classes/:classId/pending-students
+   */
+  fastify.get('/classes/:classId/pending-students', async (request, reply) => {
+    const authReq = request as AuthenticatedRequest;
+    const { classId } = request.params as { classId: string };
+
+    await checkClassOwnership(classId, authReq.user!.id, authReq.user!.role);
+
+    const pendingStudents = await prisma.user.findMany({
+      where: { classId, status: 'pending' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        institution: true,
+        createdAt: true
+      }
+    });
+
+    return reply.status(200).send({
+      success: true,
+      students: pendingStudents
+    });
+  });
+
+  /**
+   * POST /api/instructor/classes/:classId/approve-student
+   * POST /api/instructor/classes/:classId/students/:studentId/approve
+   */
+  async function approveStudentHelper(classId: string, studentId: string, instructorId: string, role: string) {
     if (!studentId) throw new ValidationError('studentId is required.');
 
-    const targetClass = await checkClassOwnership(classId, authReq.user!.id, authReq.user!.role);
+    const targetClass = await checkClassOwnership(classId, instructorId, role);
 
     const student = await prisma.user.findFirst({
       where: { id: studentId, classId, status: 'pending' }
@@ -488,7 +587,6 @@ export async function instructorRoutes(fastify: FastifyInstance) {
       data: { status: 'active' }
     });
 
-    // Update or create enrollment
     const enrollment = await prisma.classEnrollment.findFirst({
       where: { studentId, classId }
     });
@@ -496,7 +594,7 @@ export async function instructorRoutes(fastify: FastifyInstance) {
     if (enrollment) {
       await prisma.classEnrollment.update({
         where: { id: enrollment.id },
-        data: { status: 'ACTIVE', approvedAt: new Date(), actionByInstructorId: authReq.user!.id }
+        data: { status: 'ACTIVE', approvedAt: new Date(), actionByInstructorId: instructorId }
       });
     } else {
       await prisma.classEnrollment.create({
@@ -506,17 +604,19 @@ export async function instructorRoutes(fastify: FastifyInstance) {
           studentEmail: student.email,
           status: 'ACTIVE',
           approvedAt: new Date(),
-          actionByInstructorId: authReq.user!.id
+          actionByInstructorId: instructorId
         }
       });
     }
 
-    // Initialize SimulationState
     const existingState = await prisma.simulationState.findFirst({
       where: { userId: studentId, classId }
     });
 
     let simStateId = '';
+    const scenario = await prisma.scenario.findUnique({ where: { id: targetClass.scenarioId } });
+    const totalDays = scenario?.durationDays || 30;
+
     if (!existingState) {
       const newState = await prisma.simulationState.create({
         data: {
@@ -524,13 +624,11 @@ export async function instructorRoutes(fastify: FastifyInstance) {
           classId,
           currentRound: 1,
           isCompleted: false,
-          status: 'DECISION_OPEN'
+          status: 'DECISION_OPEN',
+          simulationMode: scenario?.simulationMode || 'GOOGLE_ADS'
         }
       });
       simStateId = newState.id;
-
-      const scenario = await prisma.scenario.findUnique({ where: { id: targetClass.scenarioId } });
-      const totalDays = scenario?.durationDays || 30;
 
       await prisma.studentSimulationProgress.create({
         data: {
@@ -542,30 +640,48 @@ export async function instructorRoutes(fastify: FastifyInstance) {
       });
     } else {
       simStateId = existingState.id;
+      if (!existingState.simulationMode) {
+        await prisma.simulationState.update({
+          where: { id: existingState.id },
+          data: { simulationMode: scenario?.simulationMode || 'GOOGLE_ADS' }
+        });
+      }
     }
 
-    // WebSocket events
-    io?.to(`instructor:${authReq.user!.id}`).emit('student_join_approved', { studentId, classId });
+    io?.to(`instructor:${instructorId}`).emit('student_join_approved', { studentId, classId });
     io?.to(`class:${classId}`).emit('student_join_approved', { studentId, classId });
     io?.to(`user:${studentId}`).emit('student_join_approved', { classId, simulationId: simStateId });
 
-    return reply.status(200).send({
-      success: true,
-      message: 'Student join request approved successfully.'
-    });
+    // Invalidate any cached auth session so the student's next request gets
+    // fresh status='active' from DB rather than the cached 'pending' payload
+    await cacheService.invalidatePattern('auth:session:*').catch(() => {});
+
+    return { success: true, message: 'Student join request approved successfully.' };
+  }
+
+  fastify.post('/classes/:classId/approve-student', async (request, reply) => {
+    const authReq = request as AuthenticatedRequest;
+    const { classId } = request.params as { classId: string };
+    const { studentId } = request.body as { studentId: string };
+    const result = await approveStudentHelper(classId, studentId, authReq.user!.id, authReq.user!.role);
+    return reply.status(200).send(result);
+  });
+
+  fastify.post('/classes/:classId/students/:studentId/approve', async (request, reply) => {
+    const authReq = request as AuthenticatedRequest;
+    const { classId, studentId } = request.params as { classId: string; studentId: string };
+    const result = await approveStudentHelper(classId, studentId, authReq.user!.id, authReq.user!.role);
+    return reply.status(200).send(result);
   });
 
   /**
    * POST /api/instructor/classes/:classId/reject-student
+   * POST /api/instructor/classes/:classId/students/:studentId/reject
    */
-  fastify.post('/classes/:classId/reject-student', async (request, reply) => {
-    const authReq = request as AuthenticatedRequest;
-    const { classId } = request.params as { classId: string };
-    const { studentId, reason } = request.body as { studentId: string; reason?: string };
-
+  async function rejectStudentHelper(classId: string, studentId: string, reason: string | undefined, instructorId: string, role: string) {
     if (!studentId) throw new ValidationError('studentId is required.');
 
-    await checkClassOwnership(classId, authReq.user!.id, authReq.user!.role);
+    await checkClassOwnership(classId, instructorId, role);
 
     const student = await prisma.user.findFirst({
       where: { id: studentId, classId, status: 'pending' }
@@ -580,16 +696,62 @@ export async function instructorRoutes(fastify: FastifyInstance) {
 
     await prisma.classEnrollment.updateMany({
       where: { studentId, classId },
-      data: { status: 'REJECTED', rejectedAt: new Date(), rejectionReason: reason || 'Rejected by instructor', actionByInstructorId: authReq.user!.id }
+      data: { status: 'REJECTED', rejectedAt: new Date(), rejectionReason: reason || 'Rejected by instructor', actionByInstructorId: instructorId }
     });
 
-    // WebSocket events
-    io?.to(`instructor:${authReq.user!.id}`).emit('student_join_rejected', { studentId, classId });
+    io?.to(`instructor:${instructorId}`).emit('student_join_rejected', { studentId, classId });
     io?.to(`user:${studentId}`).emit('student_join_rejected', { classId, reason });
+
+    return { success: true, message: 'Student join request rejected.' };
+  }
+
+  fastify.post('/classes/:classId/reject-student', async (request, reply) => {
+    const authReq = request as AuthenticatedRequest;
+    const { classId } = request.params as { classId: string };
+    const { studentId, reason } = request.body as { studentId: string; reason?: string };
+    const result = await rejectStudentHelper(classId, studentId, reason, authReq.user!.id, authReq.user!.role);
+    return reply.status(200).send(result);
+  });
+
+  fastify.post('/classes/:classId/students/:studentId/reject', async (request, reply) => {
+    const authReq = request as AuthenticatedRequest;
+    const { classId, studentId } = request.params as { classId: string; studentId: string };
+    const { reason } = request.body as { reason?: string };
+    const result = await rejectStudentHelper(classId, studentId, reason, authReq.user!.id, authReq.user!.role);
+    return reply.status(200).send(result);
+  });
+
+  /**
+   * DELETE /api/instructor/classes/:classId/students/:studentId
+   */
+  fastify.delete('/classes/:classId/students/:studentId', async (request, reply) => {
+    const authReq = request as AuthenticatedRequest;
+    const { classId, studentId } = request.params as { classId: string; studentId: string };
+
+    await checkClassOwnership(classId, authReq.user!.id, authReq.user!.role);
+
+    const student = await prisma.user.findFirst({
+      where: { id: studentId, classId }
+    });
+
+    if (!student) throw new NotFoundError('Student not found in this class.');
+
+    await prisma.user.update({
+      where: { id: studentId },
+      data: { classId: null, status: 'active' }
+    });
+
+    await prisma.classEnrollment.updateMany({
+      where: { studentId, classId },
+      data: { status: 'TERMINATED', removedAt: new Date(), actionByInstructorId: authReq.user!.id }
+    });
+
+    io?.to(`instructor:${authReq.user!.id}`).emit('student_removed', { studentId, classId });
+    io?.to(`user:${studentId}`).emit('student_removed', { classId });
 
     return reply.status(200).send({
       success: true,
-      message: 'Student join request rejected.'
+      message: 'Student removed from class successfully.'
     });
   });
 
@@ -714,7 +876,11 @@ export async function instructorRoutes(fastify: FastifyInstance) {
   fastify.post('/scenarios/:scenarioId/assign', async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
     const { scenarioId } = request.params as { scenarioId: string };
-    const { classId } = request.body as { classId: string };
+    const { classId, roundDuration, totalRounds } = request.body as {
+      classId: string;
+      roundDuration?: number;
+      totalRounds?: number;
+    };
 
     if (!classId) throw new ValidationError('classId is required.');
 
@@ -727,6 +893,8 @@ export async function instructorRoutes(fastify: FastifyInstance) {
       where: { id: classId },
       data: { scenarioId }
     });
+
+    const activeMode = scenario.simulationMode || 'GOOGLE_ADS';
 
     // Create assignments entry
     await prisma.scenarioAssignment.create({
@@ -742,7 +910,10 @@ export async function instructorRoutes(fastify: FastifyInstance) {
         dailyProcessingTime: '09:00',
         dailyBudgetCap: scenario.dailyBudgetCap || 500.0,
         difficulty: scenario.difficulty || 'medium',
-        status: 'ACTIVE'
+        status: 'ACTIVE',
+        simulationMode: activeMode,
+        roundDurationHours: roundDuration || 24,
+        totalRounds: totalRounds || scenario.maxRounds
       }
     });
 
@@ -762,7 +933,8 @@ export async function instructorRoutes(fastify: FastifyInstance) {
             classId,
             currentRound: 1,
             isCompleted: false,
-            status: 'DECISION_OPEN'
+            status: 'DECISION_OPEN',
+            simulationMode: activeMode
           }
         });
         await prisma.studentSimulationProgress.create({
@@ -773,10 +945,16 @@ export async function instructorRoutes(fastify: FastifyInstance) {
             status: 'DECISION_OPEN'
           }
         });
+      } else {
+        // Update simulationMode if not aligned
+        await prisma.simulationState.update({
+          where: { id: existing.id },
+          data: { simulationMode: activeMode }
+        });
       }
     }
 
-    io?.to(`class:${classId}`).emit('scenario_assigned', { classId, scenarioId });
+    io?.to(`class:${classId}`).emit('scenario_assigned', { classId, scenarioId, simulationMode: activeMode });
 
     return reply.status(200).send({
       success: true,

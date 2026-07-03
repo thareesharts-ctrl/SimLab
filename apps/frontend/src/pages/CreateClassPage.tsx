@@ -24,6 +24,10 @@ export function CreateClassPage() {
 
   // Form State
   const [className, setClassName] = useState("")
+  const [semester, setSemester] = useState("Spring 2026")
+  const [batch, setBatch] = useState("Batch A")
+  const [department, setDepartment] = useState("Business & Marketing")
+  const [subject, setSubject] = useState("Digital Marketing Analytics")
   const [scenarioName, setScenarioName] = useState("")
   const [scenarioDescription, setScenarioDescription] = useState("")
   const [industry, setIndustry] = useState("Digital Marketing")
@@ -33,24 +37,14 @@ export function CreateClassPage() {
   const [targetKPI, setTargetKPI] = useState<"revenue" | "clicks" | "conversions">("revenue")
   const [difficulty, setDifficulty] = useState("medium")
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([
-    "SEO",
-    "GOOGLE_ADS",
-    "META_ADS"
+    "GOOGLE_ADS"
   ])
 
   // Submission State
   const [isLoading, setIsLoading] = useState(false)
 
   const handlePlatformToggle = (platform: string) => {
-    if (selectedPlatforms.includes(platform)) {
-      if (selectedPlatforms.length === 1) {
-        toast.error("At least one platform must be enabled.")
-        return
-      }
-      setSelectedPlatforms(selectedPlatforms.filter((p) => p !== platform))
-    } else {
-      setSelectedPlatforms([...selectedPlatforms, platform])
-    }
+    setSelectedPlatforms([platform])
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -97,7 +91,8 @@ export function CreateClassPage() {
         baselineOrganicTraffic: Number(baselineOrganicTraffic),
         targetKPI,
         difficulty,
-        allowedPlatforms: JSON.stringify(selectedPlatforms)
+        allowedPlatforms: JSON.stringify(selectedPlatforms),
+        simulationMode: selectedPlatforms[0]
       }
 
       const newScenario = await createCustomScenario(scenarioData)
@@ -109,7 +104,15 @@ export function CreateClassPage() {
       toast.loading("Deploying new classroom...", { id: toastId })
 
       // Step 2: Create the Classroom using the returned scenarioId
-      const newClass = await createClass(className.trim(), newScenario.id)
+      const newClass = await createClass(
+        className.trim(),
+        newScenario.id,
+        semester.trim(),
+        batch.trim(),
+        department.trim(),
+        subject.trim(),
+        "SimLab Marketing Academy"
+      )
 
       toast.success(`Classroom "${newClass.class.name}" successfully created!`, { id: toastId })
       
@@ -194,6 +197,74 @@ export function CreateClassPage() {
                 <span className="text-[10px] text-neutral-400 block leading-tight">
                   Students will see this name when joining the class cohort.
                 </span>
+              </div>
+
+              {/* Semester */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block" htmlFor="semesterInput">
+                  Semester
+                </label>
+                <Input
+                  id="semesterInput"
+                  type="text"
+                  placeholder="e.g. Spring 2026"
+                  value={semester}
+                  onChange={(e) => setSemester(e.target.value)}
+                  className="text-xs border-neutral-200 h-10 font-semibold text-neutral-808 bg-white focus-visible:ring-indigo-500"
+                  disabled={isLoading}
+                  required
+                />
+              </div>
+
+              {/* Batch */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block" htmlFor="batchInput">
+                  Batch
+                </label>
+                <Input
+                  id="batchInput"
+                  type="text"
+                  placeholder="e.g. Batch A"
+                  value={batch}
+                  onChange={(e) => setBatch(e.target.value)}
+                  className="text-xs border-neutral-200 h-10 font-semibold text-neutral-808 bg-white focus-visible:ring-indigo-500"
+                  disabled={isLoading}
+                  required
+                />
+              </div>
+
+              {/* Department */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block" htmlFor="departmentInput">
+                  Department
+                </label>
+                <Input
+                  id="departmentInput"
+                  type="text"
+                  placeholder="e.g. Business & Marketing"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  className="text-xs border-neutral-200 h-10 font-semibold text-neutral-808 bg-white focus-visible:ring-indigo-500"
+                  disabled={isLoading}
+                  required
+                />
+              </div>
+
+              {/* Subject */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block" htmlFor="subjectInput">
+                  Subject
+                </label>
+                <Input
+                  id="subjectInput"
+                  type="text"
+                  placeholder="e.g. Digital Marketing Analytics"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  className="text-xs border-neutral-200 h-10 font-semibold text-neutral-808 bg-white focus-visible:ring-indigo-500"
+                  disabled={isLoading}
+                  required
+                />
               </div>
 
               {/* Industry */}
@@ -322,16 +393,16 @@ export function CreateClassPage() {
                 />
               </div>
 
-              {/* Enabled Platforms */}
+              {/* Enabled Platforms / Simulation Type */}
               <div className="space-y-2 border-t border-neutral-100 pt-4">
                 <label className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block">
-                  Enabled Simulation Platforms
+                  Class Simulation Type
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { id: "SEO", label: "SEO Optimization", desc: "Organic search, content quality, and keywords" },
-                    { id: "GOOGLE_ADS", label: "Google Ads", desc: "Paid search campaigns, budgets, and bidding" },
-                    { id: "META_ADS", label: "Meta Ads", desc: "Social reach, demographics, and creatives" }
+                    { id: "GOOGLE_ADS", label: "Google Ads Only", desc: "Paid search campaigns, keyword bids, and search engine budget optimization" },
+                    { id: "META_ADS", label: "Meta Ads Only", desc: "Paid social campaigns, audiences, bidding types, and creative assets" },
+                    { id: "SEO", label: "SEO Only", desc: "Organic search optimization, content quality, backlink build, and metadata" }
                   ].map((p) => {
                     const isChecked = selectedPlatforms.includes(p.id)
                     return (
@@ -346,10 +417,11 @@ export function CreateClassPage() {
                       >
                         <div className="flex items-center gap-2">
                           <input
-                            type="checkbox"
+                            type="radio"
+                            name="simulationType"
                             checked={isChecked}
                             onChange={() => {}} // toggled by parent div click
-                            className="rounded border-neutral-300 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 pointer-events-none"
+                            className="rounded-full border-neutral-350 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 pointer-events-none"
                           />
                           <span className="text-xs font-bold">{p.label}</span>
                         </div>
@@ -361,7 +433,7 @@ export function CreateClassPage() {
                   })}
                 </div>
                 <span className="text-[10px] text-neutral-400 block leading-tight">
-                  Select which digital marketing modules are active for this scenario. Disabled modules will be hidden.
+                  Choose the single marketing module active for this classroom simulation. Only one mode is permitted per class.
                 </span>
               </div>
 

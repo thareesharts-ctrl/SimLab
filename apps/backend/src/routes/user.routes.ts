@@ -608,6 +608,7 @@ export async function userRoutes(fastify: FastifyInstance) {
             currentRound: 1,
             isCompleted: false,
             status: 'DECISION_OPEN',
+            simulationMode: student.class?.scenario?.simulationMode || 'GOOGLE_ADS',
           },
         });
 
@@ -620,6 +621,13 @@ export async function userRoutes(fastify: FastifyInstance) {
             status: 'DECISION_OPEN'
           }
         });
+      } else {
+        if (!existingState.simulationMode) {
+          await prisma.simulationState.update({
+            where: { id: existingState.id },
+            data: { simulationMode: student.class?.scenario?.simulationMode || 'GOOGLE_ADS' }
+          });
+        }
       }
     }
 

@@ -134,6 +134,16 @@ export async function campaignRoutes(fastify: FastifyInstance) {
       where: { userId, classId: targetClassId }
     });
     if (!existingState) {
+      let activeMode = 'GOOGLE_ADS';
+      if (activeAssignmentRelation?.assignment?.simulationMode) {
+        activeMode = activeAssignmentRelation.assignment.simulationMode;
+      } else {
+        const sc = await prisma.scenario.findUnique({ where: { id: scenarioId } });
+        if (sc?.simulationMode) {
+          activeMode = sc.simulationMode;
+        }
+      }
+
       const newState = await prisma.simulationState.create({
         data: {
           userId,
@@ -141,6 +151,7 @@ export async function campaignRoutes(fastify: FastifyInstance) {
           currentRound: 1,
           isCompleted: false,
           status: 'DECISION_OPEN',
+          simulationMode: activeMode,
         }
       });
       const totalDays = durationDays || 30;
@@ -152,6 +163,22 @@ export async function campaignRoutes(fastify: FastifyInstance) {
           status: 'DECISION_OPEN'
         }
       });
+    } else {
+      if (!existingState.simulationMode) {
+        let activeMode = 'GOOGLE_ADS';
+        if (activeAssignmentRelation?.assignment?.simulationMode) {
+          activeMode = activeAssignmentRelation.assignment.simulationMode;
+        } else {
+          const sc = await prisma.scenario.findUnique({ where: { id: scenarioId } });
+          if (sc?.simulationMode) {
+            activeMode = sc.simulationMode;
+          }
+        }
+        await prisma.simulationState.update({
+          where: { id: existingState.id },
+          data: { simulationMode: activeMode }
+        });
+      }
     }
 
     // Create a new daily campaign run

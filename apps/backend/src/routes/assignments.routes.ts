@@ -97,6 +97,14 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
       throw new ValidationError(`End date does not match the start date + ${durationDays} days duration.`);
     }
 
+    // Fetch scenario details
+    const scenario = await prisma.scenario.findUnique({
+      where: { id: scenarioId }
+    });
+    if (!scenario) {
+      throw new NotFoundError('Scenario template not found.');
+    }
+
     // Verify class ownership
     const targetClass = await prisma.class.findFirst({
       where: {
@@ -155,6 +163,9 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
         difficulty,
         autoStart,
         status: 'DRAFT',
+        simulationMode: scenario.simulationMode || 'GOOGLE_ADS',
+        roundDurationHours: 24,
+        totalRounds: scenario.maxRounds,
       },
     });
 
@@ -457,7 +468,8 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
                 classId: assignment.classId,
                 currentRound: 1,
                 isCompleted: false,
-                status: 'DECISION_OPEN'
+                status: 'DECISION_OPEN',
+                simulationMode: assignment.simulationMode || 'GOOGLE_ADS'
               }
             });
             await prisma.studentSimulationProgress.create({
@@ -553,7 +565,8 @@ export async function assignmentRoutes(fastify: FastifyInstance) {
               classId: assignment.classId,
               currentRound: 1,
               isCompleted: false,
-              status: 'DECISION_OPEN'
+              status: 'DECISION_OPEN',
+              simulationMode: assignment.simulationMode || 'GOOGLE_ADS'
             }
           });
           await prisma.studentSimulationProgress.create({

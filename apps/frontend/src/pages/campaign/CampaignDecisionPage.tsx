@@ -36,9 +36,19 @@ export function CampaignDecisionPage() {
   // Meta Ads
   const [metaCampaigns, setMetaCampaigns] = useState<any[]>([]);
 
+  const simulationMode = activeRun?.assignment?.simulationMode || activeRun?.scenario?.simulationMode;
+
   useEffect(() => {
     fetchState();
   }, [fetchState]);
+
+  useEffect(() => {
+    if (simulationMode) {
+      if (simulationMode === "GOOGLE_ADS") setActiveTab("google");
+      else if (simulationMode === "META_ADS") setActiveTab("meta");
+      else if (simulationMode === "SEO") setActiveTab("seo");
+    }
+  }, [simulationMode]);
 
   useEffect(() => {
     // Populate form if there's previous data or active decision
@@ -156,7 +166,7 @@ export function CampaignDecisionPage() {
 
   const handleFormSubmit = async () => {
     if (!isEditable) return;
-    if (selectedKeywords.length === 0) {
+    if ((!simulationMode || simulationMode === "SEO") && selectedKeywords.length === 0) {
       toast.error("Please target at least one keyword for SEO.");
       return;
     }
@@ -186,6 +196,12 @@ export function CampaignDecisionPage() {
     }
   };
 
+  const availableTabs = [
+    { id: "seo", label: "Search Engine Optimization", icon: Globe, modeKey: "SEO" },
+    { id: "google", label: "Google Pay-Per-Click", icon: Search, modeKey: "GOOGLE_ADS" },
+    { id: "meta", label: "Meta Paid Social", icon: Sliders, modeKey: "META_ADS" },
+  ].filter(t => !simulationMode || t.modeKey === simulationMode);
+
   return (
     <div className="p-4 sm:p-6 md:p-8 max-w-5xl mx-auto space-y-6 text-left animate-in fade-in duration-300">
       
@@ -208,6 +224,11 @@ export function CampaignDecisionPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {simulationMode && (
+            <Badge className="bg-indigo-50 text-indigo-805 border border-indigo-200 font-bold px-3.5 py-1 rounded-full text-[10px] uppercase">
+              Class Simulation Type: {simulationMode.replace('_', ' ')}
+            </Badge>
+          )}
           {isPast && (
             <Badge className="bg-neutral-100 text-neutral-600 border border-neutral-200 font-bold px-3.5 py-1 rounded-full text-[10px] uppercase">
               Locked (Past Day)
@@ -238,11 +259,7 @@ export function CampaignDecisionPage() {
 
       {/* Editor Tabs */}
       <div className="flex border-b border-neutral-200">
-        {[
-          { id: "seo", label: "Search Engine Optimization", icon: Globe },
-          { id: "google", label: "Google Pay-Per-Click", icon: Search },
-          { id: "meta", label: "Meta Paid Social", icon: Sliders },
-        ].map(tab => {
+        {availableTabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button
@@ -250,7 +267,7 @@ export function CampaignDecisionPage() {
               onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center gap-2 px-5 py-3.5 font-bold text-xs border-b-2 transition-colors ${
                 activeTab === tab.id
-                  ? "border-indigo-600 text-indigo-600"
+                  ? "border-indigo-650 text-indigo-650"
                   : "border-transparent text-neutral-500 hover:text-neutral-900"
               }`}
             >

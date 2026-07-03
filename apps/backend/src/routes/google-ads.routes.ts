@@ -117,6 +117,10 @@ export async function googleAdsRoutes(fastify: FastifyInstance) {
       throw new NotFoundError('Simulation not initialized.');
     }
 
+    if (sim.simulationMode && sim.simulationMode !== 'GOOGLE_ADS') {
+      throw new ValidationError(`This class simulation is restricted to ${sim.simulationMode}. You cannot submit Google Ads decisions.`);
+    }
+
     if (sim.status !== 'DECISION_OPEN') {
       await prisma.hardViolation.create({
         data: {

@@ -530,5 +530,9 @@ async function runE2E() {
 
 runE2E().catch(err => {
   console.error('E2E validation crashed:', err);
+  console.log('\n--- Captured Console Logs ---');
+  consoleLogs.forEach(log => console.log(log));
+  console.log('\n--- Captured Network Errors ---');
+  networkErrors.forEach(err => console.log(err));
   process.exit(1);
 });

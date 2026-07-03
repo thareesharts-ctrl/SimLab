@@ -71,6 +71,7 @@ export async function scenarioRoutes(fastify: FastifyInstance) {
       allowedPlatforms: z.string().optional(),
       allowedCampaignTypes: z.string().optional(),
       checkpointRequired: z.boolean().default(true),
+      simulationMode: z.string().optional(),
     });
 
     const parsed = bodySchema.safeParse(request.body);
@@ -107,6 +108,7 @@ export async function scenarioRoutes(fastify: FastifyInstance) {
       allowedPlatforms: z.string().optional(),
       allowedCampaignTypes: z.string().optional(),
       checkpointRequired: z.boolean().optional(),
+      simulationMode: z.string().optional(),
     });
 
     const parsed = bodySchema.safeParse(request.body);
