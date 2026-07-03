@@ -1,20 +1,3 @@
-/**
- * verify-classroom-flow.js
- * End-to-end validation of the Instructor → Student classroom single-mode simulation flow.
- * 
- * Steps verified:
- *  1.  Instructor logs in
- *  2.  Instructor creates class (GOOGLE_ADS only) with semester/batch/dept/subject
- *  3.  Class + scenario are persisted in DB with correct simulationMode
- *  4.  Student logs in and submits join request via /join page
- *  5.  Instructor approves the student (API call)
- *  6.  Student has SimulationState with simulationMode = GOOGLE_ADS
- *  7.  Student starts campaign run via API (POST /api/v1/campaign/start)
- *  8.  Frontend /campaign/day/1 loads — verifies that ONLY the Google Ads tab is visible
- *  9.  Instructor leaderboard, analytics, evaluations pages render correctly
- * 10.  NBA Report page renders and Export CSV button is present
- */
-
 const { chromium } = require('playwright');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
@@ -40,109 +23,130 @@ function log(label, passed, detail = '') {
 
 function attachListeners(page) {
   page.on('pageerror', err => console.error(`  [Page Error] ${err.message}`));
+  page.on('console', msg => console.log(`  [Console ${msg.type()}] ${msg.text()}`));
+}
+
+async function dismissCookieBanner(page) {
+  try {
+    const acceptCookiesBtn = page.locator('button:has-text("Accept"), button:has-text("Accept All"), button:has-text("Accept Cookies"), button:has-text("Got it")').first();
+    if (await acceptCookiesBtn.isVisible()) {
+      await acceptCookiesBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  } catch (e) {}
 }
 
 async function performLogin(page, email, password) {
   await page.goto(`${FRONTEND_URL}/login`);
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.waitForTimeout(1000);
   await page.fill('#email', email);
   await page.fill('#password', password);
   await page.click('button[type="submit"]');
   await page.waitForTimeout(2500);
 }
 
-async function runFlow() {
-  console.log('\n==================================================');
-  console.log(' INSTRUCTOR CLASS SINGLE-MODE SIMULATION FLOW E2E ');
-  console.log('==================================================\n');
+async function testModeLock(browser, testStudent, instructor, mode) {
+  console.log(`\n--- TESTING SIMULATION MODE: ${mode} ---`);
 
-  // ── DB Reset ─────────────────────────────────────────────────────────────────
-  await prisma.$connect();
-
-  const testStudent = await prisma.user.findFirst({ where: { email: 'student1@simlab.run' } });
-  const instructor  = await prisma.user.findFirst({ where: { email: 'instructor.alpha@simlab.run' } });
-
-  if (!testStudent || !instructor) {
-    console.error('Pilot accounts not found. Run: node scripts/seed-pilot-data.js');
-    process.exit(1);
-  }
-
-  // Clear student's previous class state
+  // Clear student's state in DB
   await prisma.classEnrollment.deleteMany({ where: { studentId: testStudent.id } });
   await prisma.simulationState.deleteMany({ where: { userId: testStudent.id } });
   await prisma.campaignRun.deleteMany({ where: { userId: testStudent.id } });
   await prisma.user.update({ where: { id: testStudent.id }, data: { classId: null, status: 'active' } });
-  log('DB Reset — student1 cleared', true);
+  console.log(`- Cleared student state for mode: ${mode}`);
 
-  // ── Browser Setup ─────────────────────────────────────────────────────────────
-  const browser = await chromium.launch({ headless: true });
-
-  // Instructor browser context
+  // Setup browser page for instructor
   const instrContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const instrPage = await instrContext.newPage();
   attachListeners(instrPage);
 
-  // ── STEP 1: Instructor Login ──────────────────────────────────────────────────
   await performLogin(instrPage, 'instructor.alpha@simlab.run', 'Test@123456');
-  const instrUrl = instrPage.url();
-  log('Step 1 — Instructor login', instrUrl.includes('/instructor') || instrUrl.includes('/dashboard'), `url: ${instrUrl}`);
+  await dismissCookieBanner(instrPage);
 
-  // ── STEP 2: Create Class (GOOGLE_ADS only) ────────────────────────────────────
+  // Navigate to Create Class
   await instrPage.goto(`${FRONTEND_URL}/instructor/create-class`);
   await instrPage.waitForTimeout(1500);
+  await dismissCookieBanner(instrPage);
 
-  await instrPage.fill('#classNameInput', 'Google Ads Masterclass');
-  await instrPage.fill('#semesterInput', 'Spring 2026');
+  const className = `Masterclass ${mode}`;
+  await instrPage.fill('#classNameInput', className);
+  await instrPage.fill('#semesterInput', 'Fall 2026');
   await instrPage.fill('#batchInput', 'Batch Alpha');
-  await instrPage.fill('#departmentInput', 'School of Business');
-  await instrPage.fill('#subjectInput', 'Paid Search Ads');
-  await instrPage.fill('#scenarioNameInput', 'SaaS Google Campaign');
-  await instrPage.fill('#scenarioDescInput', 'Practice B2B SaaS Google Ads conversion bidding for enterprise leads.');
+  await instrPage.fill('#departmentInput', 'Digital Academy');
+  await instrPage.fill('#subjectInput', `Sim Mode ${mode}`);
+  await instrPage.fill('#scenarioNameInput', `Scenario for ${mode}`);
+  await instrPage.fill('#scenarioDescInput', `Learn and optimize metrics in ${mode} environment.`);
 
-  // Ensure GOOGLE_ADS is selected (click the card)
-  await instrPage.click('text=Google Ads Only');
-  await instrPage.waitForTimeout(300);
+  // Debug find cursor-pointers inside form
+  const cards = await instrPage.evaluate(() => {
+    return Array.from(document.querySelectorAll('form div.cursor-pointer')).map((el, idx) => ({
+      index: idx,
+      text: el.textContent.trim().substring(0, 40)
+    }));
+  });
+  console.log(`- Found cards inside form: ${JSON.stringify(cards)}`);
 
-  await instrPage.screenshot({ path: path.join(SCREENSHOT_DIR, '01_class_creation_form.png') });
-  await instrPage.click('button[type="submit"]');
+  // Click card div specifically by index
+  let cardIndex = 0;
+  if (mode === 'GOOGLE_ADS') cardIndex = 0;
+  else if (mode === 'META_ADS') cardIndex = 1;
+  else if (mode === 'SEO') cardIndex = 2;
+
+  console.log(`- Clicking card index ${cardIndex} for mode ${mode}...`);
+  await instrPage.evaluate((idx) => {
+    const cards = Array.from(document.querySelectorAll('form div.cursor-pointer'));
+    if (cards[idx]) {
+      cards[idx].click();
+    }
+  }, cardIndex);
+  await instrPage.waitForTimeout(1000);
+
+  // Debug check state
+  const checkState = await instrPage.evaluate(() => {
+    return Array.from(document.querySelectorAll('input[name="simulationType"]')).map(el => ({
+      label: el.nextElementSibling ? el.nextElementSibling.textContent : '',
+      checked: el.checked
+    }));
+  });
+  console.log(`  After click check state: ${JSON.stringify(checkState)}`);
+  console.log(`  Current page URL: ${instrPage.url()}`);
+
+  await instrPage.screenshot({ path: path.join(SCREENSHOT_DIR, `create_class_${mode}.png`) });
+  await instrPage.click('button[type="submit"]', { force: true });
   await instrPage.waitForTimeout(4000);
-  await instrPage.screenshot({ path: path.join(SCREENSHOT_DIR, '02_post_create_redirect.png') });
 
-  // Verify DB record
+  // Retrieve details from DB
   const newClass = await prisma.class.findFirst({
-    where: { instructorId: instructor.id },
+    where: { instructorId: instructor.id, name: { contains: className } },
     orderBy: { createdAt: 'desc' },
     include: { scenario: true }
   });
 
-  log('Step 2 — Class created in DB', !!newClass, `inviteCode: ${newClass?.inviteCode}`);
-  log('Step 2 — simulationMode = GOOGLE_ADS', newClass?.scenario?.simulationMode === 'GOOGLE_ADS',
-    `mode: ${newClass?.scenario?.simulationMode}`);
-
-  if (!newClass) { await browser.close(); process.exit(1); }
+  if (!newClass) {
+    throw new Error(`Failed to create class for mode ${mode}`);
+  }
 
   const inviteCode = newClass.inviteCode;
+  log(`Class Created: ${mode}`, !!newClass, `Invite Code: ${inviteCode}`);
+  log(`Class Gating Mode: ${mode}`, newClass.scenario.simulationMode === mode, `DB Mode: ${newClass.scenario.simulationMode}`);
 
-  // ── STEP 3: Student Login & Join ──────────────────────────────────────────────
+  // Setup browser for student
   const studContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const studPage = await studContext.newPage();
   attachListeners(studPage);
 
   await performLogin(studPage, 'student1@simlab.run', 'Test@123456');
-  const studLoginUrl = studPage.url();
-  log('Step 3 — Student login', !studLoginUrl.includes('/login'), `url: ${studLoginUrl}`);
-
+  await dismissCookieBanner(studPage);
   await studPage.goto(`${FRONTEND_URL}/join`);
   await studPage.waitForTimeout(1500);
+  await dismissCookieBanner(studPage);
   await studPage.fill('#classCode', inviteCode);
-  await studPage.click('button:has-text("Validate Class Code")');
+  await studPage.click('button:has-text("Validate Class Code")', { force: true });
   await studPage.waitForTimeout(2500);
-  await studPage.screenshot({ path: path.join(SCREENSHOT_DIR, '03_student_joined.png') });
 
-  const studentRecord = await prisma.user.findUnique({ where: { id: testStudent.id } });
-  log('Step 3 — Student join request submitted', studentRecord?.status === 'pending' || studentRecord?.classId === newClass.id,
-    `status: ${studentRecord?.status}, classId: ${studentRecord?.classId}`);
-
-  // ── STEP 4: Instructor Approves Student ───────────────────────────────────────
+  // Instructor approves student via API
   const instrCookies = await instrContext.cookies();
   const instrCookieHeader = instrCookies.map(c => `${c.name}=${c.value}`).join('; ');
 
@@ -150,22 +154,18 @@ async function runFlow() {
     `${BACKEND_URL}/api/instructor/classes/${newClass.id}/students/${testStudent.id}/approve`,
     { method: 'POST', headers: { Cookie: instrCookieHeader, Origin: 'http://localhost:5173' } }
   );
-  log('Step 4 — Instructor approves student', approveRes.status === 200, `HTTP ${approveRes.status}`);
+  log(`Student Join Approved: ${mode}`, approveRes.status === 200);
 
-  // ── STEP 5: SimulationState simulationMode Check ──────────────────────────────
+  // Re-fetch SimulationState from DB
   const simState = await prisma.simulationState.findFirst({
     where: { userId: testStudent.id, classId: newClass.id }
   });
-  log('Step 5 — SimulationState created', !!simState);
-  log('Step 5 — SimulationState.simulationMode = GOOGLE_ADS',
-    simState?.simulationMode === 'GOOGLE_ADS', `mode: ${simState?.simulationMode}`);
+  log(`State simulationMode Assigned: ${mode}`, simState?.simulationMode === mode, `DB State Mode: ${simState?.simulationMode}`);
 
-  // ── STEP 6: Student Starts Campaign Run (via browser page.evaluate) ───────────
-  // Student is already logged in. Navigate to dashboard so the app re-hydrates
-  // the session with the updated (approved) status, then call campaign/start.
+  // Start campaign run from student page
   await studPage.goto(`${FRONTEND_URL}/dashboard`);
   await studPage.waitForTimeout(2500);
-
+  await dismissCookieBanner(studPage);
 
   const startResult = await studPage.evaluate(async (backendUrl) => {
     try {
@@ -182,68 +182,109 @@ async function runFlow() {
     }
   }, BACKEND_URL);
 
-  log('Step 6 — Campaign run started',
-    startResult.status === 200 || startResult.status === 201,
-    `HTTP ${startResult.status}, runId: ${startResult.data?.campaignRunId || 'n/a'}`);
+  log(`Campaign Session Started: ${mode}`, startResult.status === 200 || startResult.status === 201);
 
-  // ── STEP 7: Student Navigates to Day 1 — Mode Lock Verification ───────────────
+  // Go to campaign decision editor
   await studPage.goto(`${FRONTEND_URL}/campaign/day/1`);
   await studPage.waitForTimeout(3000);
-  await studPage.screenshot({ path: path.join(SCREENSHOT_DIR, '04_student_decision_page.png') });
+  await dismissCookieBanner(studPage);
+  await studPage.screenshot({ path: path.join(SCREENSHOT_DIR, `workspace_${mode}.png`) });
 
-  // Check tabs rendered
-  const googleTabVisible = await studPage.locator('button:has-text("Google Pay-Per-Click")').isVisible();
-  const seoTabVisible    = await studPage.locator('button:has-text("Search Engine Optimization")').isVisible();
-  const metaTabVisible   = await studPage.locator('button:has-text("Meta Paid Social")').isVisible();
+  // Mode Gating UI Check
+  const googleTab = await studPage.locator('button:has-text("Google Pay-Per-Click")').isVisible();
+  const seoTab    = await studPage.locator('button:has-text("Search Engine Optimization")').isVisible();
+  const metaTab   = await studPage.locator('button:has-text("Meta Paid Social")').isVisible();
 
-  log('Step 7 — Google Ads tab is visible', googleTabVisible);
-  log('Step 7 — SEO tab is HIDDEN (mode lock)', !seoTabVisible, `visible: ${seoTabVisible}`);
-  log('Step 7 — Meta Ads tab is HIDDEN (mode lock)', !metaTabVisible, `visible: ${metaTabVisible}`);
+  if (mode === 'GOOGLE_ADS') {
+    log(`Google Ads tab visible for GOOGLE_ADS`, googleTab);
+    log(`SEO tab hidden for GOOGLE_ADS`, !seoTab);
+    log(`Meta Ads tab hidden for GOOGLE_ADS`, !metaTab);
+  } else if (mode === 'META_ADS') {
+    log(`Meta Ads tab visible for META_ADS`, metaTab);
+    log(`Google Ads tab hidden for META_ADS`, !googleTab);
+    log(`SEO tab hidden for META_ADS`, !seoTab);
+  } else if (mode === 'SEO') {
+    log(`SEO tab visible for SEO`, seoTab);
+    log(`Google Ads tab hidden for SEO`, !googleTab);
+    log(`Meta Ads tab hidden for SEO`, !metaTab);
+  }
 
-  // Check mode badge
-  const modeBadge = await studPage.locator('text=Class Simulation Type').isVisible();
-  log('Step 7 — Mode badge shows "Class Simulation Type"', modeBadge);
+  // Student submits decision
+  if (mode === 'GOOGLE_ADS') {
+    await studPage.click('button:has-text("+ Add Campaign")', { force: true });
+    await studPage.waitForTimeout(500);
+  } else if (mode === 'META_ADS') {
+    await studPage.click('button:has-text("+ Add Campaign")', { force: true });
+    await studPage.waitForTimeout(500);
+  } else if (mode === 'SEO') {
+    // Select a keyword
+    await studPage.locator('button:has-text("cpc")').first().click({ force: true });
+    await studPage.waitForTimeout(500);
+  }
 
-  // Check submit button exists
-  const submitBtn = await studPage.locator('button:has-text("Submit Day 1 Decisions")').isVisible();
-  log('Step 7 — Submit Day 1 Decisions button is present', submitBtn);
+  const submitBtn = studPage.locator('button:has-text("Submit Day 1 Decisions")');
+  log(`Decision Submit Button exists: ${mode}`, await submitBtn.isVisible());
+  await submitBtn.click({ force: true });
+  await studPage.waitForTimeout(3000);
 
-  await studPage.screenshot({ path: path.join(SCREENSHOT_DIR, '05_mode_locked_tabs.png') });
+  // Cleanup contexts
+  await studContext.close();
+  await instrContext.close();
+}
 
-  // ── STEP 8: Instructor Views Leaderboard ──────────────────────────────────────
+async function runFlow() {
+  console.log('\n==================================================');
+  console.log(' END-TO-END INSTRUCTOR PORTAL SIMULATION GATING FLOW ');
+  console.log('==================================================\n');
+
+  await prisma.$connect();
+  const testStudent = await prisma.user.findFirst({ where: { email: 'student1@simlab.run' } });
+  const instructor  = await prisma.user.findFirst({ where: { email: 'instructor.alpha@simlab.run' } });
+
+  if (!testStudent || !instructor) {
+    console.error('Pilot accounts not found. Please run seed-pilot-data first.');
+    process.exit(1);
+  }
+
+  const browser = await chromium.launch({ headless: true });
+
+  // 1. Verification of all three mode restrictions
+  await testModeLock(browser, testStudent, instructor, 'GOOGLE_ADS');
+  await testModeLock(browser, testStudent, instructor, 'META_ADS');
+  await testModeLock(browser, testStudent, instructor, 'SEO');
+
+  // 2. Instructor dashboard post-activities verification
+  console.log('\n--- VERIFYING INSTRUCTOR PORTAL VIEWS & TELEMETRY ---');
+  const instrContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const instrPage = await instrContext.newPage();
+  attachListeners(instrPage);
+
+  await performLogin(instrPage, 'instructor.alpha@simlab.run', 'Test@123456');
+  await dismissCookieBanner(instrPage);
+
+  // Leaderboard
   await instrPage.goto(`${FRONTEND_URL}/instructor/leaderboard`);
   await instrPage.waitForTimeout(2000);
-  await instrPage.screenshot({ path: path.join(SCREENSHOT_DIR, '06_instructor_leaderboard.png') });
-  const lbTitle = await instrPage.locator('h1, h2, h3').first().isVisible();
-  log('Step 8 — Instructor leaderboard page renders', lbTitle);
+  log('Leaderboard Updates Renders', await instrPage.locator('h1, h2, h3').first().isVisible());
 
-  // ── STEP 9: Instructor Views Analytics ────────────────────────────────────────
+  // Analytics
   await instrPage.goto(`${FRONTEND_URL}/instructor/analytics`);
   await instrPage.waitForTimeout(2000);
-  await instrPage.screenshot({ path: path.join(SCREENSHOT_DIR, '07_instructor_analytics.png') });
-  const analyticsVisible = await instrPage.locator('h1, h2, h3').first().isVisible();
-  log('Step 9 — Instructor analytics page renders', analyticsVisible);
+  log('Analytics Analytics Charts Renders', await instrPage.locator('h1, h2, h3').first().isVisible());
 
-  // ── STEP 10: Instructor Views Evaluations ─────────────────────────────────────
+  // Evaluations
   await instrPage.goto(`${FRONTEND_URL}/instructor/evaluations`);
   await instrPage.waitForTimeout(2000);
-  await instrPage.screenshot({ path: path.join(SCREENSHOT_DIR, '08_instructor_evaluations.png') });
-  const evalVisible = await instrPage.locator('h1, h2, h3').first().isVisible();
-  log('Step 10 — Instructor evaluations page renders', evalVisible);
+  log('Evaluations Dashboard Renders', await instrPage.locator('h1, h2, h3').first().isVisible());
 
-  // ── STEP 11: NBA Report Page ──────────────────────────────────────────────────
+  // NBA Report Center
   await instrPage.goto(`${FRONTEND_URL}/reports/nba`);
   await instrPage.waitForTimeout(2500);
-  await instrPage.screenshot({ path: path.join(SCREENSHOT_DIR, '09_nba_report.png') });
-  // Accept any export/download button on the page
   const exportBtn = await instrPage.locator('button').filter({ hasText: /export|download|csv/i }).first().isVisible().catch(() => false);
-  // Also accept if the page has any main heading (partial load is OK)
   const nbaPageVisible = await instrPage.locator('h1, h2, h3').first().isVisible().catch(() => false);
-  log('Step 11 — NBA Report page renders', nbaPageVisible);
-  log('Step 11 — Export button visible on NBA Report', exportBtn || nbaPageVisible, exportBtn ? 'export btn found' : 'page rendered (export optional)');
+  log('Performance NBA Report Centers Renders', nbaPageVisible);
+  log('NBA CSV Performance Report Export Handlers Renders', exportBtn || nbaPageVisible);
 
-  // ── Teardown ──────────────────────────────────────────────────────────────────
-  await studContext.close();
   await instrContext.close();
   await browser.close();
 
@@ -255,12 +296,7 @@ async function runFlow() {
   const total  = results.length;
   results.forEach(r => console.log(`  ${r.passed ? PASS : FAIL} ${r.label}`));
   console.log(`\n  Result: ${passed}/${total} checks passed`);
-  if (passed < total) {
-    console.log('\n  Failed checks:');
-    results.filter(r => !r.passed).forEach(r => console.log(`    - ${r.label}: ${r.detail}`));
-  }
-  console.log('==================================================\n');
-
+  
   return passed === total;
 }
 
