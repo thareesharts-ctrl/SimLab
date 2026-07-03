@@ -166,6 +166,36 @@ export async function initSocketServer(server: HttpServer): Promise<void> {
         logger.info({ socketId: socket.id, room: `simulation:${simulationId}` }, 'Socket joined simulation room.');
       });
 
+      socket.on('join-instructor', async (instructorId: string) => {
+        if (!instructorId) return;
+        socket.join(`instructor:${instructorId}`);
+        try {
+          const prismaClient = (await import('../db/client')).prisma;
+          const classes = await prismaClient.class.findMany({
+            where: { instructorId },
+            select: { id: true }
+          });
+          classes.forEach(c => {
+            socket.join(`class:${c.id}`);
+          });
+          logger.info({ socketId: socket.id, instructorId, classCount: classes.length }, 'Socket joined instructor and owned class rooms.');
+        } catch (err) {
+          logger.error(err, `Failed to query classes for instructor join rooms: ${instructorId}`);
+        }
+      });
+
+      socket.on('join-class', (classId: string) => {
+        if (!classId) return;
+        socket.join(`class:${classId}`);
+        logger.info({ socketId: socket.id, room: `class:${classId}` }, 'Socket joined class room.');
+      });
+
+      socket.on('join-scenario', (scenarioId: string) => {
+        if (!scenarioId) return;
+        socket.join(`scenario:${scenarioId}`);
+        logger.info({ socketId: socket.id, room: `scenario:${scenarioId}` }, 'Socket joined scenario room.');
+      });
+
       /**
        * Legacy: plain "join" with userId — kept for backwards compat.
        */

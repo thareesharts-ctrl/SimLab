@@ -187,8 +187,12 @@ export function SimulationHomePage() {
   }, [selectedMode])
 
   useEffect(() => {
-    loadData()
-  }, [])
+    if (user?.role === "instructor" || user?.role === "INSTRUCTOR") {
+      navigate("/instructor");
+      return;
+    }
+    loadData();
+  }, []);
 
   if (loading) {
     return (

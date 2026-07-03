@@ -6,6 +6,10 @@ import { InstructorGovernance } from "@/pages/InstructorGovernance"
 import { CreateClassPage } from "@/pages/CreateClassPage"
 import { InstructorAssignmentsPage } from "@/pages/InstructorAssignmentsPage"
 import { EditClassPage } from "@/pages/EditClassPage"
+import { InstructorScenariosPage } from "@/pages/InstructorScenariosPage"
+import { InstructorLeaderboardPage } from "@/pages/InstructorLeaderboardPage"
+import { InstructorAnalyticsPage } from "@/pages/InstructorAnalyticsPage"
+import { InstructorEvaluationsPage } from "@/pages/InstructorEvaluationsPage"
 import { ProfilePage } from "@/pages/ProfilePage"
 import { NotificationsPage } from "@/pages/NotificationsPage"
 import { SeoSimulationPage } from "@/pages/simulation/SeoSimulationPage"
@@ -164,13 +168,19 @@ export function AppRouter() {
           <Route path="/billing/invoices" element={<InvoiceCenter />} />
 
           {/* Instructor Only Routes */}
-          <Route element={<InstructorLayout />}>
-            <Route path="/instructor" element={<InstructorPortal />} />
-            <Route path="/instructor/governance" element={<InstructorGovernance />} />
-            <Route path="/instructor/create-class" element={<CreateClassPage />} />
-            <Route path="/instructor/edit-class/:classId" element={<EditClassPage />} />
-            <Route path="/instructor/assignments" element={<InstructorAssignmentsPage />} />
-            <Route path="/instructor/simulation/seo" element={<SeoSimulationPage />} />
+            <Route element={<InstructorLayout />}>
+              <Route path="/instructor" element={<InstructorPortal />} />
+              <Route path="/instructor/governance" element={<InstructorGovernance />} />
+              <Route path="/instructor/create-class" element={<CreateClassPage />} />
+              <Route path="/instructor/edit-class/:classId" element={<EditClassPage />} />
+              <Route path="/instructor/assignments" element={<InstructorAssignmentsPage />} />
+              <Route path="/instructor/scenarios" element={<InstructorScenariosPage />} />
+              <Route path="/instructor/leaderboard" element={<InstructorLeaderboardPage />} />
+              <Route path="/instructor/analytics" element={<InstructorAnalyticsPage />} />
+              <Route path="/instructor/evaluations" element={<InstructorEvaluationsPage />} />
+              <Route path="/instructor/classes" element={<Navigate to="/instructor" replace />} />
+              <Route path="/instructor/reports" element={<Navigate to="/reports" replace />} />
+              <Route path="/instructor/simulation/seo" element={<SeoSimulationPage />} />
             <Route path="/instructor/simulation/google-ads" element={<GoogleAdsSimulationPage />} />
             <Route path="/instructor/simulation/meta-ads" element={<MetaAdsSimulationPage />} />
             <Route path="/reports" element={<ReportsCenter />} />

@@ -48,6 +48,7 @@ import { campaignRoutes } from './routes/campaign.routes';
 import { assignmentRoutes } from './routes/assignments.routes';
 import { briefingRoutes } from './routes/briefing.routes';
 import { sandboxRoutes } from './routes/sandbox.routes';
+import { instructorRoutes } from './routes/instructor.routes';
 
 export const app = Fastify({
   logger: false, // We use custom Pino logger
@@ -888,6 +889,8 @@ app.register(campaignRoutes, { prefix: '/api/v1/campaign' });
 app.register(assignmentRoutes, { prefix: '/api/v1/assignments' });
 app.register(briefingRoutes, { prefix: '/api/v1/briefing' });
 app.register(sandboxRoutes, { prefix: '/api/v1/sandbox' });
+app.register(instructorRoutes, { prefix: '/api/instructor' });
+app.register(instructorRoutes, { prefix: '/api/v1/instructor' });
 app.register(auditRoutes, { prefix: '/api/v1/audit' });
 app.register(notificationRoutes, { prefix: '/api/v1/notifications' });
 app.register(errorReportRoutes, { prefix: '/api/v1/error-reports' });

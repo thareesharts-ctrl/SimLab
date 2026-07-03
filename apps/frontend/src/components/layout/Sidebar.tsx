@@ -74,9 +74,14 @@ const navConfig: NavGroup[] = [
     groupName: "Instructor Panel",
     role: "instructor",
     items: [
-      { name: "Instructor Portal", href: "/instructor", icon: GraduationCap },
-      { name: "Simulation Governance", href: "/instructor/governance", icon: Shield },
+      { name: "Classrooms", href: "/instructor", icon: GraduationCap },
+      { name: "Scenario Builder", href: "/instructor/scenarios", icon: FileBarChart },
+      { name: "Assignments", href: "/instructor/assignments", icon: Clock },
+      { name: "Live Leaderboard", href: "/instructor/leaderboard", icon: Trophy },
+      { name: "Performance Analytics", href: "/instructor/analytics", icon: Activity },
+      { name: "Student Evaluations", href: "/instructor/evaluations", icon: Award },
       { name: "Reports Center", href: "/reports", icon: FileBarChart },
+      { name: "Simulation Governance", href: "/instructor/governance", icon: Shield },
       {
         name: "Simulation Sandbox",
         icon: Play,
@@ -128,8 +133,11 @@ export function Sidebar({ className }: SidebarProps) {
   // Filter groups by role
   const visibleGroups = navConfig.filter(group => {
     if (group.role && group.role !== userRole) return false
-    // Hide Dashboard for instructors
-    if (group.groupName === "Dashboard" && userRole === "instructor") return false
+    if (userRole === "instructor") {
+      if (["Dashboard", "Simulation Lab", "Billing"].includes(group.groupName)) {
+        return false
+      }
+    }
     return true
   })
 
