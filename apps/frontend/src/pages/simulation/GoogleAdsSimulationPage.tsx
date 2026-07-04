@@ -13,6 +13,7 @@ import { Link, useNavigate, useLocation } from "react-router"
 import { useGoogleAdsStore, type MatchType } from "@/stores/googleAdsStore"
 import { useSimulationStore } from "@/stores/simulationStore"
 import { useAuthStore } from "@/stores/authStore"
+import { normalizeRole } from "@/lib/normalizeRole"
 import { SimulationProgressTracker } from "@/components/simulation/SimulationProgressTracker"
 import { toast } from "sonner"
 import api from "@/lib/api"
@@ -195,7 +196,7 @@ export function GoogleAdsSimulationPage() {
 
   useEffect(() => {
     const checkGating = async () => {
-      const isCollegeStudent = user?.role === "student-college"
+        const isCollegeStudent = normalizeRole(user?.role) === "STUDENT"
       if (isSimulationMode && isCollegeStudent && activeSimulation && activeSimulation.currentRound > 1) {
         try {
           const checkRes = await api.get<{ success: boolean; checkpoints: any[] }>(`/api/v1/simulation/checkpoint/${activeSimulation.id}`)

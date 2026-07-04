@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { useDailyCampaignStore } from "@/stores/dailyCampaignStore";
 import { useAuthStore } from "@/stores/authStore";
+import { normalizeRole } from "@/lib/normalizeRole";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -57,13 +58,13 @@ export function CampaignDashboard() {
           </p>
         </div>
 
-        {user?.role === "student-college" && (
+        {normalizeRole(user?.role) === "STUDENT" && (
           <div className="text-xs bg-indigo-950 text-indigo-200 p-4 rounded-2xl border border-indigo-900 font-semibold leading-relaxed">
             Please make sure you have joined a class cohort with your instructor's invite code in the main dashboard.
           </div>
         )}
 
-        {(user?.role === "individual" || user?.role === "student-college" || user?.role === "instructor" || user?.role === "admin") && (
+        {(normalizeRole(user?.role) !== null) && (
           <Button 
             onClick={handleStartCampaign}
             className="w-full bg-indigo-600 text-white hover:bg-indigo-700 font-black text-sm h-12 rounded-2xl shadow-lg transition-transform transform hover:-translate-y-0.5"

@@ -67,7 +67,14 @@ import { PricingPage } from "@/pages/billing/PricingPage"
 import { SubscriptionDashboard } from "@/pages/billing/SubscriptionDashboard"
 import { InvoiceCenter } from "@/pages/billing/InvoiceCenter"
 import { AdminBillingCenter } from "@/pages/admin/AdminBillingCenter"
+import { normalizeRole } from "@/lib/normalizeRole"
 
+// ─── Layout Guards ────────────────────────────────────────────────────────────
+
+/**
+ * ProtectedLayout — requires authentication.
+ * Handles pending/blocked student status screens.
+ */
 function ProtectedLayout() {
   const { isAuthenticated, user, fetchMe } = useAuthStore()
 
@@ -79,11 +86,12 @@ function ProtectedLayout() {
     return <Navigate to="/landing" replace />
   }
 
-  if (user?.role === "student-college") {
-    if (user.status === "pending") {
+  // Student status guards
+  if (normalizeRole(user?.role) === 'STUDENT') {
+    if (user?.status === "pending") {
       return <PendingApprovalScreen />
     }
-    if (user.status && ["rejected", "terminated", "removed"].includes(user.status)) {
+    if (user?.status && ["rejected", "terminated", "removed"].includes(user.status)) {
       return <BlockedScreen />
     }
   }
@@ -91,25 +99,59 @@ function ProtectedLayout() {
   return <AppShell />
 }
 
+/**
+ * InstructorLayout — only INSTRUCTOR or ADMIN roles may access these routes.
+ */
 function InstructorLayout() {
   const { user } = useAuthStore()
+  const normalized = normalizeRole(user?.role)
 
-  if (user && user.role !== "instructor" && user.role !== "admin") {
+  if (user && normalized !== 'INSTRUCTOR' && normalized !== 'SUPER_ADMIN') {
     return <Navigate to="/" replace />
   }
 
   return <Outlet />
 }
 
+/**
+ * AdminLayout — only ADMIN/SUPER_ADMIN roles may access these routes.
+ */
 function AdminLayout() {
   const { user } = useAuthStore()
+  const normalized = normalizeRole(user?.role)
 
-  if (user && user.role !== "admin") {
+  if (user && normalized !== 'SUPER_ADMIN') {
     return <Navigate to="/" replace />
   }
 
   return <Outlet />
 }
+
+/**
+ * SandboxGuard — blocks STUDENT and INSTRUCTOR from personal sandbox routes.
+ *
+ * STUDENT → redirects to /dashboard (classroom simulation is their path)
+ * INSTRUCTOR → redirects to /instructor
+ * INDIVIDUAL and SUPER_ADMIN → allowed through
+ *
+ * This prevents useEffect in SimulationHomePage from firing sandbox API calls
+ * before the role check can complete.
+ */
+function SandboxGuard() {
+  const { user } = useAuthStore()
+  const normalized = normalizeRole(user?.role)
+
+  if (normalized === 'STUDENT') {
+    return <Navigate to="/dashboard" replace />
+  }
+  if (normalized === 'INSTRUCTOR') {
+    return <Navigate to="/instructor" replace />
+  }
+
+  return <Outlet />
+}
+
+// ─── Router ───────────────────────────────────────────────────────────────────
 
 export function AppRouter() {
   return (
@@ -136,18 +178,20 @@ export function AppRouter() {
           <Route path="/dashboard/individual" element={<DashboardPage />} />
           <Route path="/dashboard/instructor" element={<Navigate to="/instructor" replace />} />
           
-          {/* Shared Simulation Experience Routes */}
-          <Route path="/simulation" element={<SimulationHomePage />} />
-          <Route path="/simulation/briefing" element={<ScenarioBriefingPage />} />
-          <Route path="/simulation/market-analysis" element={<MarketAnalysisPage />} />
-          <Route path="/simulation/seo" element={<SeoSimulationPage />} />
-          <Route path="/simulation/google-ads" element={<GoogleAdsSimulationPage />} />
-          <Route path="/simulation/meta-ads" element={<MetaAdsSimulationPage />} />
-          <Route path="/simulation/results" element={<SimulationResultsPage />} />
-          <Route path="/simulation/checkpoint" element={<MandatoryCheckpointPage />} />
-          <Route path="/simulation/events" element={<MarketEventsPage />} />
-          <Route path="/sandbox" element={<Navigate to="/simulation" replace />} />
-          <Route path="/sandbox/workspace" element={<SandboxWorkspace />} />
+          {/* Sandbox-only routes — STUDENT and INSTRUCTOR are blocked by SandboxGuard */}
+          <Route element={<SandboxGuard />}>
+            <Route path="/simulation" element={<SimulationHomePage />} />
+            <Route path="/simulation/briefing" element={<ScenarioBriefingPage />} />
+            <Route path="/simulation/market-analysis" element={<MarketAnalysisPage />} />
+            <Route path="/simulation/seo" element={<SeoSimulationPage />} />
+            <Route path="/simulation/google-ads" element={<GoogleAdsSimulationPage />} />
+            <Route path="/simulation/meta-ads" element={<MetaAdsSimulationPage />} />
+            <Route path="/simulation/results" element={<SimulationResultsPage />} />
+            <Route path="/simulation/checkpoint" element={<MandatoryCheckpointPage />} />
+            <Route path="/simulation/events" element={<MarketEventsPage />} />
+            <Route path="/sandbox" element={<Navigate to="/simulation" replace />} />
+            <Route path="/sandbox/workspace" element={<SandboxWorkspace />} />
+          </Route>
           
           {/* Daily Campaign Simulation Routes */}
           <Route path="/campaign" element={<CampaignDashboard />} />
@@ -213,4 +257,3 @@ export function AppRouter() {
     </BrowserRouter>
   )
 }
-

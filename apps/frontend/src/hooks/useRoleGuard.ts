@@ -2,9 +2,11 @@ import { useEffect, createElement } from "react"
 import { useNavigate, Navigate } from "react-router"
 import { useAuthStore } from "@/stores/authStore"
 import type { UserRole } from "@/types"
+import { normalizeRole } from "@/lib/normalizeRole"
 
 /**
  * Hook to enforce role-based access control inside components.
+ * Accepts canonical UserRole values (INDIVIDUAL, STUDENT_COLLEGE, INSTRUCTOR, ADMIN).
  */
 export function useRoleGuard(allowedRoles: UserRole[], redirectTo: string = "/login") {
   const { user, isAuthenticated } = useAuthStore()
@@ -42,7 +44,7 @@ export function InstructorGuard({ children, fallbackPath = "/" }: GuardProps) {
     return createElement(Navigate, { to: "/login", replace: true })
   }
 
-  if (user.role !== "instructor") {
+  if (normalizeRole(user.role) !== "INSTRUCTOR" && normalizeRole(user.role) !== "SUPER_ADMIN") {
     return createElement(Navigate, { to: fallbackPath, replace: true })
   }
 
@@ -59,8 +61,9 @@ export function StudentGuard({ children, fallbackPath = "/" }: GuardProps) {
     return createElement(Navigate, { to: "/login", replace: true })
   }
 
-  const isStudent = user.role === "individual" || user.role === "student-college"
-  if (!isStudent) {
+  const normalized = normalizeRole(user.role)
+  const isStudentLike = normalized === "INDIVIDUAL" || normalized === "STUDENT"
+  if (!isStudentLike) {
     return createElement(Navigate, { to: fallbackPath, replace: true })
   }
 
@@ -77,7 +80,7 @@ export function AdminGuard({ children, fallbackPath = "/" }: GuardProps) {
     return createElement(Navigate, { to: "/login", replace: true })
   }
 
-  if (user.role !== "admin") {
+  if (normalizeRole(user.role) !== "SUPER_ADMIN") {
     return createElement(Navigate, { to: fallbackPath, replace: true })
   }
 

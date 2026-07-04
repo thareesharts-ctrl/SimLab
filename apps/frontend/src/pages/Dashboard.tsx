@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { useAuthStore } from "@/stores/authStore"
+import { normalizeRole } from "@/lib/normalizeRole"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -41,9 +42,10 @@ export function DashboardPage() {
 
   // Redirect instructor and admin users immediately to their respective dashboards
   useEffect(() => {
-    if (user?.role === "instructor") {
+    const normalized = normalizeRole(user?.role)
+    if (normalized === "INSTRUCTOR") {
       navigate("/instructor", { replace: true })
-    } else if (user?.role === "admin") {
+    } else if (normalized === "SUPER_ADMIN") {
       navigate("/admin", { replace: true })
     }
   }, [user, navigate])
@@ -59,7 +61,7 @@ export function DashboardPage() {
         setActiveSimulation(simRes.data[0])
       }
 
-      if (user.role === "individual") {
+      if (normalizeRole(user.role) === "INDIVIDUAL") {
         // Fetch subscription
         const subRes = await api.get("/api/v1/billing/subscription").catch(() => null)
         if (subRes && subRes.data?.success) {
@@ -91,7 +93,7 @@ export function DashboardPage() {
           }
           setHasScore(false)
         }
-      } else if (user.role === "student-college") {
+      } else if (normalizeRole(user.role) === "STUDENT") {
         // Fetch active assignment
         const assignRes = await api.get("/api/v1/assignments/student/active").catch(() => null)
         if (assignRes && assignRes.data?.success) {
@@ -112,7 +114,8 @@ export function DashboardPage() {
   }
 
   useEffect(() => {
-    if (user?.role === "student-college" || user?.role === "individual") {
+    const normalized = normalizeRole(user?.role)
+    if (normalized === "STUDENT" || normalized === "INDIVIDUAL") {
       fetchDashboardData()
     }
   }, [user])
@@ -132,15 +135,13 @@ export function DashboardPage() {
 
   // Render Role Badge
   const getRoleBadge = (role: string) => {
-    switch (role) {
-      case "admin":
-      case "ADMIN":
+    const normalized = normalizeRole(role)
+    switch (normalized) {
+      case "SUPER_ADMIN":
         return <Badge className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-2.5">System Admin</Badge>
-      case "instructor":
       case "INSTRUCTOR":
         return <Badge className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-1 px-2.5">Course Instructor</Badge>
-      case "student-college":
-      case "STUDENT_COLLEGE":
+      case "STUDENT":
         return <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1 px-2.5">Academic Student</Badge>
       default:
         return <Badge className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-1 px-2.5">Individual Plan</Badge>
@@ -199,7 +200,7 @@ export function DashboardPage() {
           {/* ======================================================
               INDIVIDUAL LEARNER MODE VIEW
              ====================================================== */}
-          {user?.role === "individual" && (
+          {normalizeRole(user?.role) === "INDIVIDUAL" && (
             <div className="space-y-8">
               
               {/* Top Row: Sub status, Limits, and CTA */}
@@ -447,7 +448,7 @@ export function DashboardPage() {
           {/* ======================================================
               COLLEGE STUDENT MODE VIEW
              ====================================================== */}
-          {user?.role === "student-college" && (
+          {normalizeRole(user?.role) === "STUDENT" && (
             <div className="space-y-8">
               
               {/* Top Row: Scenario Briefing, Countdown, and Standing Comparison */}
@@ -550,7 +551,7 @@ export function DashboardPage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 
                 {/* Cohort Benchmarking standings */}
-                {(!activeSimulation?.classId || user?.role?.toLowerCase() === "individual") ? null : (
+                {(!activeSimulation?.classId || normalizeRole(user?.role) === "INDIVIDUAL") ? null : (
                   <Card className="border border-neutral-200/80 shadow-md p-6 space-y-6 text-left md:col-span-2 flex flex-col justify-between bg-white">
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
@@ -624,7 +625,7 @@ export function DashboardPage() {
                 )}
 
                 {/* Academic Simulation Actions */}
-                <Card className={`border border-neutral-200/80 shadow-md p-6 space-y-4 text-left flex flex-col justify-between bg-white ${(!activeSimulation?.classId || user?.role?.toLowerCase() === "individual") ? "md:col-span-3" : ""}`}>
+                <Card className={`border border-neutral-200/80 shadow-md p-6 space-y-4 text-left flex flex-col justify-between bg-white ${(!activeSimulation?.classId || normalizeRole(user?.role) === "INDIVIDUAL") ? "md:col-span-3" : ""}`}>
                   <div className="space-y-3.5">
                     <h3 className="font-extrabold text-base text-neutral-900">Campaign Console</h3>
                     <p className="text-xs text-neutral-400 font-semibold leading-relaxed">

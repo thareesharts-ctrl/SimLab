@@ -27,11 +27,18 @@ async function logAudit(userId: string, action: string, details: string) {
 export async function sandboxRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', requireAuth);
 
-  const checkRole = (request: AuthenticatedRequest) => {
+  const checkRole = (request: AuthenticatedRequest): boolean => {
     const role = request.user!.role;
+    if (role === 'STUDENT_COLLEGE') {
+      throw new ForbiddenError('Students must use their classroom-assigned simulation. Sandbox mode is not available for this account.');
+    }
+    if (role === 'INSTRUCTOR') {
+      throw new ForbiddenError('Instructors must use the Instructor Portal for scenario preview and classroom simulations.');
+    }
     if (role !== 'INDIVIDUAL' && role !== 'ADMIN') {
       throw new ForbiddenError('Only Individual Learners or Administrators can access sandbox mode.');
     }
+    return true;
   };
 
   /**
@@ -141,6 +148,19 @@ export async function sandboxRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/sample-scenarios', async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
+    const role = authReq.user!.role;
+
+    // Return empty safe list for students — never 403 on read endpoints
+    if (role === 'STUDENT_COLLEGE') {
+      return reply.status(200).send({
+        success: true,
+        mode: (request.query as any).mode || 'GOOGLE_ADS',
+        scenarios: [],
+        presetScenarios: [],
+        message: 'Students use classroom simulation, not personal sandbox.'
+      });
+    }
+
     checkRole(authReq);
     const { mode } = request.query as { mode: string };
 
@@ -427,6 +447,21 @@ export async function sandboxRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/state', async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
+    const role = authReq.user!.role;
+
+    // Return a safe empty state for students rather than 403
+    // (students should never reach this via the fixed frontend, but handle gracefully in case)
+    if (role === 'STUDENT_COLLEGE') {
+      return reply.status(200).send({
+        success: true,
+        hasState: false,
+        hasActiveSimulation: false,
+        state: null,
+        nextAction: 'USE_CLASSROOM_SIMULATION',
+        message: 'Students use classroom simulation, not personal sandbox.'
+      });
+    }
+
     checkRole(authReq);
     const userId = authReq.user!.id;
 

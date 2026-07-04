@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router"
 import { useAuthStore } from "@/stores/authStore"
+import { normalizeRole } from "@/lib/normalizeRole"
 import { Button } from "@/components/ui/button"
 import { Card, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -187,10 +188,18 @@ export function SimulationHomePage() {
   }, [selectedMode])
 
   useEffect(() => {
-    if (user?.role === "instructor" || user?.role === "INSTRUCTOR") {
-      navigate("/instructor");
+    const normalized = normalizeRole(user?.role);
+    // STUDENT must use classroom simulation — do NOT call sandbox APIs
+    if (normalized === 'STUDENT') {
+      navigate("/dashboard", { replace: true });
       return;
     }
+    // INSTRUCTOR has their own portal
+    if (normalized === 'INSTRUCTOR') {
+      navigate("/instructor", { replace: true });
+      return;
+    }
+    // Only INDIVIDUAL and SUPER_ADMIN load sandbox state
     loadData();
   }, []);
 
@@ -203,8 +212,10 @@ export function SimulationHomePage() {
     )
   }
 
-  const isAdmin = user?.role === "admin";
-  const isIndividual = user?.role === "individual" || user?.role === "instructor" || user?.role === "admin";
+  const normalizedRole = normalizeRole(user?.role);
+  const isAdmin = normalizedRole === 'SUPER_ADMIN';
+  // isIndividual: INDIVIDUAL and SUPER_ADMIN can use personal sandbox
+  const isIndividual = normalizedRole === 'INDIVIDUAL' || normalizedRole === 'SUPER_ADMIN';
 
   if (errorMsg && isIndividual) {
     return (

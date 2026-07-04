@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router"
 import { useSimulationStore } from "@/stores/simulationStore"
 import { useResultsStore } from "@/stores/resultsStore"
 import { useAuthStore } from "@/stores/authStore"
+import { normalizeRole } from "@/lib/normalizeRole"
 import { Button } from "@/components/ui/button"
 import { Card, CardTitle, CardDescription } from "@/components/ui/card"
 import { 
@@ -46,7 +47,7 @@ export function SimulationResultsPage() {
         await fetchResults(state.id)
         
         // Check checkpoint submission
-        const isCollegeStudent = user?.role === "student-college"
+        const isCollegeStudent = normalizeRole(user?.role) === "STUDENT"
         if (isCollegeStudent && state.currentRound > 1) {
           try {
             const checkRes = await api.get<{ success: boolean; checkpoints: any[] }>(`/api/v1/simulation/checkpoint/${state.id}`)

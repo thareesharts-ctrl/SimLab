@@ -11,6 +11,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { toast } from "sonner"
 import { Hash, User, Mail, Lock, ArrowLeft, ArrowRight, ShieldCheck } from "lucide-react"
 import api from "@/lib/api"
+import { getRoleRedirectPath } from "@/lib/normalizeRole"
 
 const codeSchema = z.object({
   classCode: z
@@ -98,17 +99,7 @@ export function JoinClassScreen() {
         classJoinCode: validatedCode,
       })
       toast.success(`Successfully joined class ${validatedCode}!`)
-      
-      const roleStr = (user?.role as string) || ""
-      if (roleStr === "admin") {
-        navigate("/admin", { replace: true })
-      } else if (roleStr === "student-college" || roleStr === "student") {
-        navigate("/dashboard/student", { replace: true })
-      } else if (roleStr === "instructor") {
-        navigate("/dashboard/instructor", { replace: true })
-      } else {
-        navigate("/dashboard/individual", { replace: true })
-      }
+      navigate(getRoleRedirectPath(user?.role), { replace: true })
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to join class")
     } finally {

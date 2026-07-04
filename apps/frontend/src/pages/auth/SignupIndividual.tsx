@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
 import { toast } from "sonner"
 import { User, Mail, Lock, Check, CreditCard, ArrowLeft, ArrowRight } from "lucide-react"
+import { getRoleRedirectPath } from "@/lib/normalizeRole"
 
 const step1Schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -74,17 +75,7 @@ export function SignupIndividual() {
         planType: selectedPlan.id,
       })
       toast.success(`Registered successfully! Active Plan: ${selectedPlan.name}`)
-      
-      const roleStr = (user?.role as string) || ""
-      if (roleStr === "admin") {
-        navigate("/admin")
-      } else if (roleStr === "student-college" || roleStr === "student") {
-        navigate("/dashboard/student")
-      } else if (roleStr === "instructor") {
-        navigate("/dashboard/instructor")
-      } else {
-        navigate("/dashboard/individual")
-      }
+      navigate(getRoleRedirectPath(user?.role))
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to create account")
     } finally {

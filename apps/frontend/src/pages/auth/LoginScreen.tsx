@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
 import { toast } from "sonner"
 import { Mail, Lock, ArrowRight, ShieldAlert } from "lucide-react"
+import { normalizeRole, getRoleRedirectPath } from "@/lib/normalizeRole"
 
 const loginSchema = z.object({
   email: z.string().min(1, "Email is required").email("Please enter a valid email"),
@@ -41,9 +42,23 @@ export function LoginScreen() {
   const onSubmit = async (data: LoginFormInputs) => {
     setIsLoading(true)
     try {
-      await login(data.email, data.password)
-      toast.success("Welcome back to SimpLab!")
-      navigate("/", { replace: true })
+      const user = await login(data.email, data.password)
+      toast.success("Welcome back to SimLab!")
+
+      const normalizedRole = normalizeRole(user.role)
+      const redirectPath = getRoleRedirectPath(user.role)
+
+      // Dev-only role routing log
+      if (import.meta.env.DEV) {
+        console.info('[SimLab Login]', {
+          email: user.email,
+          role: user.role,
+          normalizedRole,
+          redirectTo: redirectPath,
+        })
+      }
+
+      navigate(redirectPath, { replace: true })
     } catch (err: any) {
       toast.error("Invalid email or password. Please try again.")
     } finally {

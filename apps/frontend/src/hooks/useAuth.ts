@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuthStore } from '../stores/authStore';
+import { normalizeRole } from '../lib/normalizeRole';
 
 export function useAuth() {
   const navigate = useNavigate();
@@ -17,14 +18,14 @@ export function useAuth() {
         return;
       }
 
-      // Role-based redirection as per step 3 instructions
-      if (currentUser.role === 'individual') {
-        navigate('/dashboard/individual', { replace: true });
-      } else if (currentUser.role === 'student-college') {
-        navigate('/dashboard/student', { replace: true });
-      } else if (currentUser.role === 'instructor') {
-        navigate('/dashboard/instructor', { replace: true });
+      // Role-based redirection using normalizeRole to handle any casing variant
+      const normalized = normalizeRole(currentUser.role);
+      if (normalized === 'SUPER_ADMIN') {
+        navigate('/admin', { replace: true });
+      } else if (normalized === 'INSTRUCTOR') {
+        navigate('/instructor', { replace: true });
       }
+      // INDIVIDUAL and STUDENT both stay at /dashboard
     };
 
     verifySession();

@@ -1,21 +1,12 @@
+import { normalizeRole, getRoleRedirectPath } from './normalizeRole'
+
 export function getSafeDashboardRoute(role?: string | null): string {
-  if (!role) return "/"
-  const r = role.toLowerCase().replace('_', '-')
-  if (r === "admin" || r === "super-admin") {
-    return "/admin"
-  }
-  if (r === "instructor") {
-    return "/instructor"
-  }
-  if (r === "individual" || r === "student-college" || r === "student") {
-    return "/dashboard"
-  }
-  return "/"
+  return getRoleRedirectPath(role)
 }
 
 export function exitSandboxWorkspace(navigate: any, role?: string | null) {
-  const r = role ? role.toLowerCase().replace('_', '-') : null
-  if (r === "admin" || r === "individual") {
+  const normalized = normalizeRole(role)
+  if (normalized === 'SUPER_ADMIN' || normalized === 'INDIVIDUAL') {
     navigate("/simulation", { replace: true })
   } else {
     navigate(getSafeDashboardRoute(role), { replace: true })
