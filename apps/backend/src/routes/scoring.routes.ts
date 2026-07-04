@@ -11,11 +11,60 @@ export async function scoringRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/breakdown', { preHandler: [requireAuth] }, async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
+    const user = authReq.user;
+
+    if (!user) {
+      return reply.status(401).send({ success: false, error: 'Unauthorized' });
+    }
+
+    const role = (user.role || 'INDIVIDUAL').toUpperCase().replace('-', '_');
 
     try {
+      if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+        return reply.status(200).send({
+          success: true,
+          hasScore: false,
+          role,
+          breakdown: {
+            overall: 0,
+            performance: 0,
+            adaptability: 0,
+            budgetDiscipline: 0,
+            riskManagement: 0,
+            roiEfficiency: 0,
+            policyCompliance: 100
+          },
+          metrics: [],
+          recommendations: [],
+          nextAction: 'START_SANDBOX_SIMULATION',
+          breakdowns: []
+        });
+      }
+
+      if (role === 'INSTRUCTOR') {
+        return reply.status(200).send({
+          success: true,
+          hasScore: false,
+          role,
+          message: 'Instructor account. Personal scoring is not applicable.',
+          breakdown: {
+            overall: 0,
+            performance: 0,
+            adaptability: 0,
+            budgetDiscipline: 0,
+            riskManagement: 0,
+            roiEfficiency: 0,
+            policyCompliance: 100
+          },
+          metrics: [],
+          recommendations: [],
+          breakdowns: []
+        });
+      }
+
       const sim = await prisma.simulationState.findFirst({
         where: {
-          userId: authReq.user!.id
+          userId: user.id
         },
         orderBy: {
           createdAt: 'desc'
@@ -57,13 +106,37 @@ export async function scoringRoutes(fastify: FastifyInstance) {
           hasScore: false,
           status: 'IN_PROGRESS',
           message: 'Score will be available after the first simulation result is generated.',
+          breakdown: {
+            overall: 0,
+            performance: 0,
+            adaptability: 0,
+            budgetDiscipline: 0,
+            riskManagement: 0,
+            roiEfficiency: 0,
+            policyCompliance: 100
+          },
+          metrics: [],
+          recommendations: [],
           breakdowns: []
         });
       }
 
+      const latest = breakdowns[breakdowns.length - 1];
+
       return reply.status(200).send({
         success: true,
         hasScore: true,
+        breakdown: {
+          overall: latest?.compositeIndex ?? 0,
+          performance: latest?.seoScore ?? 0,
+          adaptability: latest?.adaptability ?? 0,
+          budgetDiscipline: latest?.budgetDiscipline ?? 0,
+          riskManagement: latest?.riskManagement ?? 0,
+          roiEfficiency: latest?.efficiencyRoi ?? 0,
+          policyCompliance: 100
+        },
+        metrics: [],
+        recommendations: [],
         breakdowns
       });
     } catch (err: any) {
