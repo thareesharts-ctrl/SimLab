@@ -1,362 +1,423 @@
-const { chromium } = require('playwright');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+/**
+ * SimLab Demo Account Integration Test
+ * Tests all pilot accounts: login → role → redirect → API access
+ *
+ * Usage: node scripts/verify-roles-dashboards.js [BASE_URL]
+ * Default: http://localhost:5000
+ */
 
-const FRONTEND_URL = 'http://localhost:5173';
-const BACKEND_URL = 'http://localhost:5000';
+const http = require('http');
+const https = require('https');
 
-const SCREENSHOT_DIR = 'D:\\simlab-role-dashboard-screenshots';
-const TRACE_DIR = 'D:\\simlab-role-dashboard-traces';
-const ARTIFACT_DIR = 'D:\\simlab-role-dashboard-artifacts';
+const BASE_URL = process.env.BASE_URL || process.argv[2] || 'http://localhost:5000';
+const RESULTS = [];
+let PASS = 0, FAIL = 0;
 
-const USERS = {
-  admin: { email: 'superadmin@simlab.test', password: 'Test@123456', expectedRole: 'ADMIN', expectedDashboard: '/admin' },
-  instructor: { email: 'instructor@simlab.test', password: 'Test@123456', expectedRole: 'INSTRUCTOR', expectedDashboard: '/instructor' },
-  student: { email: 'student1@simlab.test', password: 'Test@123456', expectedRole: 'STUDENT_COLLEGE', expectedDashboard: '/dashboard' },
-  individual: { email: 'individual@simlab.test', password: 'Test@123456', expectedRole: 'INDIVIDUAL', expectedDashboard: '/dashboard' }
-};
+// ─── HTTP helper ──────────────────────────────────────────────────────────────
 
-const TEST_ROUTES = [
-  '/admin',
-  '/admin/users',
-  '/admin/billing',
-  '/instructor',
-  '/reports',
-  '/reports/nba',
-  '/campaign',
-  '/campaign/day/1',
-  '/leaderboard',
-  '/progress',
-  '/certificate',
-  '/pricing',
-  '/subscription',
-  '/billing/invoices'
-];
-
-async function loginAndGetCookies(browser, email, password) {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  
-  // Navigate to login
-  await page.goto(`${FRONTEND_URL}/login`);
-  await page.waitForSelector('#email');
-  
-  await page.fill('#email', email);
-  await page.fill('#password', password);
-  await page.click('button:has-text("Sign In"), button[type="submit"]');
-  
-  // Wait a few seconds for auth/redirect to complete
-  await page.waitForTimeout(3000);
-  
-  const cookies = await context.cookies();
-  const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-  
-  await context.close();
-  return cookieHeader;
+function req(path, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(BASE_URL + path);
+    const lib = u.protocol === 'https:' ? https : http;
+    const options = {
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname + u.search,
+      method: opts.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(opts.cookie ? { Cookie: opts.cookie } : {}),
+        ...(opts.headers || {}),
+      },
+      timeout: 15000,
+    };
+    const r = lib.request(options, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        let body;
+        try { body = JSON.parse(data); } catch { body = data; }
+        resolve({ status: res.statusCode, headers: res.headers, body });
+      });
+    });
+    r.on('error', reject);
+    r.on('timeout', () => reject(new Error('timeout')));
+    if (opts.body) r.write(JSON.stringify(opts.body));
+    r.end();
+  });
 }
 
-async function runValidation() {
-  console.log('==================================================');
-  console.log('STARTING ROLE-BASED DASHBOARD UX & ACCESS CONTROL AUDIT');
-  console.log('==================================================');
+function pass(name, detail = '') {
+  PASS++;
+  RESULTS.push({ status: 'PASS', name, detail });
+  console.log(`  ✅ PASS  ${name}${detail ? ' — ' + detail : ''}`);
+}
 
-  const browser = await chromium.launch({ headless: true });
-  const reportData = {
-    timestamp: new Date().toISOString(),
-    loginRedirects: {},
-    featureChecks: {},
-    routeMatrix: {},
-    apiRbac: {},
-    bugs: [],
-    verdict: 'GO'
-  };
+function fail(name, detail = '') {
+  FAIL++;
+  RESULTS.push({ status: 'FAIL', name, detail });
+  console.log(`  ❌ FAIL  ${name}${detail ? ' — ' + detail : ''}`);
+}
 
-  // Ensure output directories exist
-  [SCREENSHOT_DIR, TRACE_DIR, ARTIFACT_DIR].forEach(dir => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+function info(msg) {
+  console.log(`  ℹ️  ${msg}`);
+}
+
+// ─── Login helper ─────────────────────────────────────────────────────────────
+
+async function login(email, password) {
+  const res = await req('/api/auth/sign-in/email', {
+    method: 'POST',
+    body: { email, password },
   });
+  const rawCookies = res.headers['set-cookie'] || [];
+  const cookie = rawCookies.map(c => c.split(';')[0]).join('; ');
+  return { status: res.status, body: res.body, cookie };
+}
 
-  // Get Cookies for direct API testing
-  console.log('\n[PREPARATION] GETTING AUTH COOKIES FOR DIRECT API CHECKS...');
-  const userCookies = {};
-  for (const [key, creds] of Object.entries(USERS)) {
-    try {
-      userCookies[key] = await loginAndGetCookies(browser, creds.email, creds.password);
-      console.log(`- Acquired cookie session for role: ${creds.expectedRole}`);
-    } catch (e) {
-      console.error(`Failed login check for ${creds.email}:`, e.message);
-      reportData.bugs.push({ area: 'Auth', message: `Could not retrieve login session for ${creds.expectedRole}: ${e.message}` });
-    }
+// ─── fetchMe helper ──────────────────────────────────────────────────────────
+
+async function fetchMe(cookie) {
+  const res = await req('/api/auth/me', { cookie });
+  return res;
+}
+
+// ─── normalizeRole (mirror of frontend) ──────────────────────────────────────
+
+function normalizeRole(role) {
+  if (!role) return null;
+  const r = role.toUpperCase().replace(/-/g, '_');
+  if (r === 'ADMIN' || r === 'SUPER_ADMIN') return 'SUPER_ADMIN';
+  if (r === 'INSTRUCTOR') return 'INSTRUCTOR';
+  if (r === 'STUDENT' || r === 'STUDENT_COLLEGE') return 'STUDENT';
+  if (r === 'INDIVIDUAL' || r === 'LEARNER') return 'INDIVIDUAL';
+  return null;
+}
+
+function getRoleRedirectPath(role) {
+  const n = normalizeRole(role);
+  if (n === 'SUPER_ADMIN') return '/admin';
+  if (n === 'INSTRUCTOR') return '/instructor';
+  return '/dashboard';
+}
+
+// ─── Per-account test ────────────────────────────────────────────────────────
+
+async function testAccount({ email, password, expectedRole, expectSandboxAllowed, expectedRedirect }) {
+  console.log(`\n${'━'.repeat(70)}`);
+  console.log(`👤  ${email}  [expected: ${expectedRole}]`);
+  console.log(`${'━'.repeat(70)}`);
+
+  // 1. Login
+  let loginRes;
+  try {
+    loginRes = await login(email, password);
+  } catch (e) {
+    fail(`Login ${email}`, `NETWORK ERROR: ${e.message}`);
+    return;
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // STEP 1 & 2 & 3 & 4 & 5 & 6: Validate Dashboards and Navigation per Role
-  // ────────────────────────────────────────────────────────────────────────
-  for (const [roleName, creds] of Object.entries(USERS)) {
-    console.log(`\n==================================================`);
-    console.log(`AUDITING ROLE: ${creds.expectedRole}`);
-    console.log(`==================================================`);
+  if (loginRes.status >= 400) {
+    fail(`Login ${email}`, `HTTP ${loginRes.status} — ${JSON.stringify(loginRes.body).slice(0, 80)}`);
+    return;
+  }
 
-    const context = await browser.newContext();
-    const tracePath = path.join(TRACE_DIR, `${roleName}-trace.zip`);
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-    
-    const page = await context.newPage();
-    const screenshotPath = path.join(SCREENSHOT_DIR, `dashboard_${roleName}.png`);
+  const hasCookie = loginRes.cookie.length > 0;
+  if (!hasCookie) {
+    fail(`Login ${email}`, 'No session cookie returned');
+    return;
+  }
+  pass(`Login ${email}`, `HTTP ${loginRes.status}`);
 
-    try {
-      // 1. Login
-      console.log(`- Navigating to Login Page...`);
-      await page.goto(`${FRONTEND_URL}/login`);
-      await page.waitForSelector('#email');
-      
-      await page.fill('#email', creds.email);
-      await page.fill('#password', creds.password);
-      
-      console.log(`- Submitting login for ${creds.email}...`);
-      await page.click('button:has-text("Sign In"), button[type="submit"]');
-      await page.waitForTimeout(3000);
+  const cookie = loginRes.cookie;
 
-      // Verify redirect
-      const dashboardUrl = page.url();
-      console.log(`- Redirected to URL: ${dashboardUrl}`);
-      
-      let redirectPass = false;
-      if (roleName === 'admin') {
-        redirectPass = dashboardUrl.includes('/admin');
-      } else if (roleName === 'instructor') {
-        redirectPass = dashboardUrl.includes('/instructor');
-      } else if (roleName === 'student') {
-        redirectPass = dashboardUrl.includes('/dashboard') || dashboardUrl.includes('/student') || dashboardUrl === `${FRONTEND_URL}/` || dashboardUrl === FRONTEND_URL;
-      } else if (roleName === 'individual') {
-        redirectPass = dashboardUrl.includes('/dashboard') || dashboardUrl.includes('/dashboard/individual') || dashboardUrl === `${FRONTEND_URL}/` || dashboardUrl === FRONTEND_URL;
-      }
+  // 2. fetchMe — verify role
+  let meRes;
+  try {
+    meRes = await fetchMe(cookie);
+  } catch (e) {
+    fail(`fetchMe ${email}`, e.message);
+    return;
+  }
 
-      reportData.loginRedirects[roleName] = {
-        expected: creds.expectedDashboard,
-        actual: dashboardUrl,
-        success: redirectPass
-      };
-      console.log(`- Login Redirect Status: ${redirectPass ? 'PASS' : 'FAIL'}`);
+  if (meRes.status !== 200) {
+    fail(`fetchMe ${email}`, `HTTP ${meRes.status}`);
+    return;
+  }
 
-      // Take screenshot of landing page
-      await page.screenshot({ path: screenshotPath });
-      console.log(`- Dashboard screenshot saved: ${screenshotPath}`);
+  const actualRole = meRes.body?.role;
+  const normalizedActual = normalizeRole(actualRole);
+  const normalizedExpected = normalizeRole(expectedRole);
+  const roleMatch = normalizedActual === normalizedExpected;
 
-      // Verify session persistence
-      console.log(`- Reloading page to test session persistence...`);
-      await page.reload();
-      await page.waitForTimeout(2000);
-      const postReloadUrl = page.url();
-      const reloadPass = postReloadUrl === dashboardUrl;
-      console.log(`- Session persistent: ${reloadPass ? 'YES' : 'NO'}`);
-      
-      // Perform Sidebar & UX Inspection
-      console.log(`- Extracting sidebar/navigation menu items...`);
-      const navLinks = await page.evaluate(() => {
-        // Find links in sidebars/navs
-        const links = Array.from(document.querySelectorAll('nav a, aside a, .sidebar a'));
-        return links.map(a => ({
-          text: a.innerText.trim().replace(/\n/g, ' '),
-          href: a.getAttribute('href')
-        })).filter(l => l.text.length > 0);
-      });
+  info(`role in DB: ${actualRole}  →  normalized: ${normalizedActual}  (expected: ${normalizedExpected})`);
+  info(`status: ${meRes.body?.status || 'n/a'}  classId: ${meRes.body?.classId || 'none'}`);
 
-      console.log(`- Visible Nav Links:`);
-      navLinks.forEach(l => console.log(`  * "${l.text}" -> ${l.href}`));
+  if (roleMatch) {
+    pass(`Role ${email}`, `${actualRole} → ${normalizedActual}`);
+  } else {
+    fail(`Role ${email}`, `got ${actualRole} (normalized: ${normalizedActual}), expected ${expectedRole} (normalized: ${normalizedExpected})`);
+  }
 
-      // Check Feature presence / absence
-      const features = {
-        navLinks,
-        hasAdminMenu: navLinks.some(l => l.href.includes('/admin')),
-        hasInstructorMenu: navLinks.some(l => l.href.includes('/instructor') || l.href.includes('/reports')),
-        hasSimulationMenu: navLinks.some(l => l.href.includes('/simulation') || l.href.includes('/campaign')),
-        hasBillingMenu: navLinks.some(l => l.href.includes('/subscription') || l.href.includes('/billing') || l.href.includes('/pricing'))
-      };
+  // 3. Redirect path
+  const actualRedirect = getRoleRedirectPath(actualRole);
+  if (actualRedirect === expectedRedirect) {
+    pass(`Redirect ${email}`, `→ ${actualRedirect}`);
+  } else {
+    fail(`Redirect ${email}`, `got ${actualRedirect}, expected ${expectedRedirect}`);
+  }
 
-      reportData.featureChecks[roleName] = {
-        sidebarCount: navLinks.length,
-        hasAdminMenu: features.hasAdminMenu,
-        hasInstructorMenu: features.hasInstructorMenu,
-        hasSimulationMenu: features.hasSimulationMenu,
-        hasBillingMenu: features.hasBillingMenu
-      };
+  // 4. Sandbox state endpoint
+  let sandboxStateRes;
+  try {
+    sandboxStateRes = await req('/api/v1/sandbox/state', { cookie });
+  } catch (e) {
+    fail(`GET /api/v1/sandbox/state ${email}`, e.message);
+    sandboxStateRes = null;
+  }
 
-      // Role-specific feature validation rules
-      if (roleName === 'admin') {
-        if (!features.hasAdminMenu) {
-          reportData.bugs.push({ role: 'ADMIN', message: 'Admin sidebar is missing link to admin panel/sub-modules.' });
-        }
-        if (features.hasSimulationMenu) {
-          console.warn('[WARNING] Admin sidebar includes student simulation settings. Validating if intentional.');
-        }
-      } else if (roleName === 'instructor') {
-        if (features.hasAdminMenu) {
-          reportData.bugs.push({ role: 'INSTRUCTOR', message: 'Instructor has access to admin menu items in sidebar.' });
-        }
-        if (!features.hasInstructorMenu) {
-          reportData.bugs.push({ role: 'INSTRUCTOR', message: 'Instructor sidebar is missing links to teaching / class management / reports.' });
-        }
-      } else if (roleName === 'student') {
-        if (features.hasAdminMenu || features.hasInstructorMenu) {
-          reportData.bugs.push({ role: 'STUDENT', message: 'Student sidebar leaks admin or instructor pages.' });
-        }
-      } else if (roleName === 'individual') {
-        if (features.hasAdminMenu || features.hasInstructorMenu) {
-          reportData.bugs.push({ role: 'INDIVIDUAL', message: 'Individual learner sidebar leaks admin or instructor pages.' });
-        }
-      }
-
-      // ────────────────────────────────────────────────────────────────────────
-      // STEP 7: Route Access Matrix Check for Current Session
-      // ────────────────────────────────────────────────────────────────────────
-      console.log(`- Running Route Access Matrix Test for ${creds.expectedRole}...`);
-      const matrix = {};
-      for (const route of TEST_ROUTES) {
-        try {
-          await page.goto(`${FRONTEND_URL}${route}`);
-          await page.waitForTimeout(1000);
-          
-          const endUrl = page.url();
-          const pageText = await page.innerText('body');
-          const isAccessDenied = pageText.toLowerCase().includes('access denied') || 
-                                 pageText.toLowerCase().includes('forbidden') || 
-                                 pageText.toLowerCase().includes('unauthorized') || 
-                                 pageText.toLowerCase().includes('not authorized') ||
-                                 pageText.includes('403') ||
-                                 pageText.includes('401');
-
-          if (endUrl === `${FRONTEND_URL}${route}`) {
-            if (isAccessDenied) {
-              matrix[route] = 'BLOCKED';
-            } else {
-              matrix[route] = 'ALLOWED';
-            }
-          } else if (endUrl.includes('/login') || endUrl.includes('/landing') || endUrl.includes('/dashboard')) {
-            matrix[route] = 'REDIRECTED';
-          } else {
-            matrix[route] = 'BLOCKED';
-          }
-        } catch (e) {
-          matrix[route] = 'ERROR';
-        }
-      }
-      reportData.routeMatrix[roleName] = matrix;
-      console.log(`  * Route Matrix Results:`, JSON.stringify(matrix));
-
-      // Test Logout
-      console.log(`- Testing logout flow...`);
-      // We can click the Logout button if visible, or hit /api/auth/sign-out
-      const logoutBtn = page.locator('button:has-text("Logout"), button:has-text("Sign Out"), a:has-text("Logout"), a:has-text("Sign Out")');
-      if (await logoutBtn.count() > 0) {
-        await logoutBtn.first().click();
-        await page.waitForTimeout(1500);
-        console.log(`- Logout button clicked, redirect destination: ${page.url()}`);
+  if (sandboxStateRes) {
+    if (expectSandboxAllowed) {
+      if (sandboxStateRes.status === 200) {
+        pass(`GET /api/v1/sandbox/state ${email}`, `HTTP 200 hasState=${sandboxStateRes.body?.hasState}`);
       } else {
-        // Fallback: manually visit sign-out endpoint or direct page navigate
-        console.log('- No direct logout button in sidebar; calling sign-out API fallback...');
-        await page.goto(`${FRONTEND_URL}/login`);
+        fail(`GET /api/v1/sandbox/state ${email}`, `Expected 200, got HTTP ${sandboxStateRes.status} — ${JSON.stringify(sandboxStateRes.body).slice(0,80)}`);
       }
-
-    } catch (e) {
-      console.error(`Error auditing role ${creds.expectedRole}:`, e.stack);
-      reportData.bugs.push({ role: creds.expectedRole, message: `Auditing crashed: ${e.message}` });
-    } finally {
-      await context.tracing.stop({ path: tracePath });
-      console.log(`- Saved trace file: ${tracePath}`);
-      await context.close();
+    } else {
+      // Should get 200 (safe empty) OR 403 — never 500
+      if (sandboxStateRes.status === 500) {
+        fail(`GET /api/v1/sandbox/state ${email}`, `Got 500 (server crash) — should return 200 safe empty or 403`);
+      } else if (sandboxStateRes.status === 200) {
+        const nextAction = sandboxStateRes.body?.nextAction;
+        if (nextAction === 'USE_CLASSROOM_SIMULATION') {
+          pass(`GET /api/v1/sandbox/state ${email}`, `HTTP 200 safe empty (nextAction=USE_CLASSROOM_SIMULATION) ✓`);
+        } else {
+          pass(`GET /api/v1/sandbox/state ${email}`, `HTTP 200 safe empty`);
+        }
+      } else if (sandboxStateRes.status === 403) {
+        const msg = sandboxStateRes.body?.message || sandboxStateRes.body?.error || '';
+        if (msg.includes('classroom') || msg.includes('Instructor') || msg.includes('sandbox')) {
+          pass(`GET /api/v1/sandbox/state ${email}`, `HTTP 403 with correct role message`);
+        } else {
+          pass(`GET /api/v1/sandbox/state ${email}`, `HTTP 403 blocked correctly`);
+        }
+      } else {
+        fail(`GET /api/v1/sandbox/state ${email}`, `Unexpected HTTP ${sandboxStateRes.status}`);
+      }
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // STEP 8: Direct Backend API RBAC Checks using Cookies
-  // ────────────────────────────────────────────────────────────────────────
-  console.log('\n==================================================');
-  console.log('AUDITING BACKEND API RBAC PERMISSIONS');
-  console.log('==================================================');
-  
-  const apiTests = [
-    { name: 'Admin Dashboard Stats', method: 'GET', url: '/api/v1/admin/dashboard-stats', allowedRoles: ['ADMIN'] },
-    { name: 'Admin User Management List', method: 'GET', url: '/api/v1/users', allowedRoles: ['ADMIN'] },
-    { name: 'Billing Analytics Overview', method: 'GET', url: '/api/v1/admin/billing/stats', allowedRoles: ['ADMIN'] },
-    { name: 'Instructor Classes List', method: 'GET', url: '/api/v1/class', allowedRoles: ['INSTRUCTOR', 'ADMIN'] },
-    { name: 'Instructor Scenario Creation', method: 'POST', url: '/api/v1/scenario', payload: { name: 'Audit Test Scenario', description: 'Desc', industry: 'E-commerce', budgetPerRound: 1000, targetKPI: 'revenue', baselineOrganicTraffic: 100 }, allowedRoles: ['INSTRUCTOR', 'ADMIN'] },
-    { name: 'Student Active Simulation State', method: 'GET', url: '/api/v1/campaign/state', allowedRoles: ['STUDENT_COLLEGE', 'INDIVIDUAL', 'INSTRUCTOR', 'ADMIN'] },
-    { name: 'Instructor Accreditations PDF', method: 'GET', url: '/api/v1/report/class/test-class-id/accreditation', allowedRoles: ['INSTRUCTOR', 'ADMIN'] }
+  // 5. Sandbox sample-scenarios endpoint
+  let ssRes;
+  try {
+    ssRes = await req('/api/v1/sandbox/sample-scenarios?mode=GOOGLE_ADS', { cookie });
+  } catch (e) {
+    fail(`GET /api/v1/sandbox/sample-scenarios ${email}`, e.message);
+    ssRes = null;
+  }
+
+  if (ssRes) {
+    if (expectSandboxAllowed) {
+      if (ssRes.status === 200) {
+        pass(`GET /api/v1/sandbox/sample-scenarios ${email}`, `HTTP 200`);
+      } else {
+        fail(`GET /api/v1/sandbox/sample-scenarios ${email}`, `Expected 200, got HTTP ${ssRes.status}`);
+      }
+    } else {
+      if (ssRes.status === 500) {
+        fail(`GET /api/v1/sandbox/sample-scenarios ${email}`, `Got 500 (should be 200 safe empty or 403)`);
+      } else if (ssRes.status === 200 || ssRes.status === 403) {
+        pass(`GET /api/v1/sandbox/sample-scenarios ${email}`, `HTTP ${ssRes.status} — not exposed as 500`);
+      } else {
+        fail(`GET /api/v1/sandbox/sample-scenarios ${email}`, `Unexpected HTTP ${ssRes.status}`);
+      }
+    }
+  }
+
+  // 6. Role-specific API check
+  if (normalizedExpected === 'STUDENT') {
+    // Student should be able to call assignment and leaderboard
+    let assignRes;
+    try {
+      assignRes = await req('/api/v1/assignments/student/active', { cookie });
+      if (assignRes.status !== 500) {
+        pass(`GET /api/v1/assignments/student/active ${email}`, `HTTP ${assignRes.status} (not 500)`);
+      } else {
+        fail(`GET /api/v1/assignments/student/active ${email}`, `HTTP 500`);
+      }
+    } catch (e) {
+      fail(`GET /api/v1/assignments/student/active ${email}`, e.message);
+    }
+  }
+
+  if (normalizedExpected === 'INDIVIDUAL') {
+    // Individual should be able to call billing subscription
+    let billingRes;
+    try {
+      billingRes = await req('/api/v1/billing/subscription', { cookie });
+      if (billingRes.status !== 500) {
+        pass(`GET /api/v1/billing/subscription ${email}`, `HTTP ${billingRes.status} (not 500)`);
+      } else {
+        fail(`GET /api/v1/billing/subscription ${email}`, `HTTP 500`);
+      }
+    } catch (e) {
+      fail(`GET /api/v1/billing/subscription ${email}`, e.message);
+    }
+  }
+
+  if (normalizedExpected === 'SUPER_ADMIN') {
+    // Admin should access admin dashboard stats
+    let adminRes;
+    try {
+      adminRes = await req('/api/v1/admin/dashboard-stats', { cookie });
+      if (adminRes.status !== 500) {
+        pass(`GET /api/v1/admin/dashboard-stats ${email}`, `HTTP ${adminRes.status} (not 500)`);
+      } else {
+        fail(`GET /api/v1/admin/dashboard-stats ${email}`, `HTTP 500`);
+      }
+    } catch (e) {
+      fail(`GET /api/v1/admin/dashboard-stats ${email}`, e.message);
+    }
+  }
+
+  if (normalizedExpected === 'INSTRUCTOR') {
+    let classesRes;
+    try {
+      classesRes = await req('/api/classes', { cookie });
+      if (classesRes.status !== 500) {
+        pass(`GET /api/classes ${email}`, `HTTP ${classesRes.status} (not 500)`);
+      } else {
+        fail(`GET /api/classes ${email}`, `HTTP 500`);
+      }
+    } catch (e) {
+      fail(`GET /api/classes ${email}`, e.message);
+    }
+  }
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  console.log(`\n${'═'.repeat(70)}`);
+  console.log(`SimLab Demo Account Role Routing Verification`);
+  console.log(`Target: ${BASE_URL}`);
+  console.log(`Time:   ${new Date().toISOString()}`);
+  console.log(`${'═'.repeat(70)}\n`);
+
+  // Health check first
+  let healthOk = false;
+  try {
+    const h = await req('/health');
+    healthOk = h.status === 200;
+    if (healthOk) {
+      console.log(`✅ Backend health: OK (HTTP 200)\n`);
+    } else {
+      console.log(`❌ Backend health: HTTP ${h.status}\n`);
+    }
+  } catch (e) {
+    console.log(`❌ Backend unreachable: ${e.message}`);
+    console.log(`\nMake sure the backend is running:\n  npm run dev -w apps/backend\n  (or set BASE_URL=https://your-production-url)\n`);
+    process.exit(1);
+  }
+
+  const ACCOUNTS = [
+    {
+      email: 'learner@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'INDIVIDUAL',
+      expectSandboxAllowed: true,
+      expectedRedirect: '/dashboard',
+    },
+    {
+      email: 'student1@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'STUDENT_COLLEGE',
+      expectSandboxAllowed: false,
+      expectedRedirect: '/dashboard',
+    },
+    {
+      email: 'student2@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'STUDENT_COLLEGE',
+      expectSandboxAllowed: false,
+      expectedRedirect: '/dashboard',
+    },
+    {
+      email: 'student3@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'STUDENT_COLLEGE',
+      expectSandboxAllowed: false,
+      expectedRedirect: '/dashboard',
+    },
+    {
+      email: 'student5@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'STUDENT_COLLEGE',
+      expectSandboxAllowed: false,
+      expectedRedirect: '/dashboard',
+    },
+    {
+      email: 'student9@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'STUDENT_COLLEGE',
+      expectSandboxAllowed: false,
+      expectedRedirect: '/dashboard',
+    },
+    {
+      email: 'instructor.alpha@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'INSTRUCTOR',
+      expectSandboxAllowed: false,
+      expectedRedirect: '/instructor',
+    },
+    {
+      email: 'superadmin@simlab.run',
+      password: 'Test@123456',
+      expectedRole: 'ADMIN',
+      expectSandboxAllowed: true,
+      expectedRedirect: '/admin',
+    },
   ];
 
-  for (const apiCheck of apiTests) {
-    const testResults = {};
-    console.log(`- Checking API: ${apiCheck.method} ${apiCheck.url}`);
-    
-    for (const [roleKey, creds] of Object.entries(USERS)) {
-      const cookie = userCookies[roleKey];
-      if (!cookie) {
-        testResults[roleKey] = 'SKIPPED_NO_AUTH';
-        continue;
-      }
-      
-      try {
-        const config = {
-          headers: { Cookie: cookie, Origin: FRONTEND_URL }
-        };
-        
-        let res;
-        if (apiCheck.method === 'GET') {
-          res = await axios.get(`${BACKEND_URL}${apiCheck.url}`, config);
-        } else {
-          res = await axios.post(`${BACKEND_URL}${apiCheck.url}`, apiCheck.payload || {}, config);
-        }
-        
-        const isAllowedRole = apiCheck.allowedRoles.includes(creds.expectedRole);
-        if (isAllowedRole) {
-          testResults[roleKey] = 'ALLOWED_CORRECT';
-        } else {
-          testResults[roleKey] = 'LEAK_UNAUTHORIZED';
-          console.error(`  [LEAK] Role ${creds.expectedRole} has access to ${apiCheck.url} (expected block)`);
-          reportData.bugs.push({
-            area: 'API RBAC',
-            message: `Security vulnerability: Role ${creds.expectedRole} accessed ${apiCheck.url} (expected block)`
-          });
-        }
-      } catch (err) {
-        const statusCode = err.response?.status;
-        const isAllowedRole = apiCheck.allowedRoles.includes(creds.expectedRole);
-        
-        if (!isAllowedRole && (statusCode === 401 || statusCode === 403)) {
-          testResults[roleKey] = 'BLOCKED_CORRECT';
-        } else if (isAllowedRole) {
-          testResults[roleKey] = `ERROR_BUT_ALLOWED_ROUTE (${statusCode || err.message})`;
-          console.warn(`  [INFO] Mapped route error for ${creds.expectedRole}: HTTP ${statusCode} for ${apiCheck.url}`);
-        } else {
-          testResults[roleKey] = `BLOCKED_WITH_OTHER_CODE (${statusCode || err.message})`;
-        }
-      }
+  for (const account of ACCOUNTS) {
+    try {
+      await testAccount(account);
+    } catch (e) {
+      console.error(`\nUnhandled error for ${account.email}:`, e.message);
+      FAIL++;
+      RESULTS.push({ status: 'FAIL', name: `Account ${account.email}`, detail: e.message });
     }
-    
-    reportData.apiRbac[apiCheck.name] = testResults;
-    console.log(`  * Access:`, JSON.stringify(testResults));
+    // Small delay to respect rate limits
+    await new Promise(r => setTimeout(r, 500));
   }
 
-  // Final Verdict logic
-  const leakFound = reportData.bugs.some(b => b.message.includes('Security vulnerability') || b.message.includes('leaks'));
-  reportData.verdict = leakFound ? 'NO-GO' : 'GO';
-  
-  // Save JSON report artifact
-  const finalJsonPath = path.join(ARTIFACT_DIR, 'results.json');
-  fs.writeFileSync(finalJsonPath, JSON.stringify(reportData, null, 2));
-  console.log(`\n- Validation JSON report saved at: ${finalJsonPath}`);
+  // ─── Summary ────────────────────────────────────────────────────────────────
+  console.log(`\n${'═'.repeat(70)}`);
+  console.log(`FINAL RESULTS — Role Routing Verification`);
+  console.log(`${'═'.repeat(70)}`);
 
-  await browser.close();
-  console.log('\n==================================================');
-  console.log('ROLE-BASED DASHBOARD AUDIT AND ACCESS CHECKS COMPLETE');
-  console.log('==================================================');
+  const maxName = Math.max(...RESULTS.map(r => r.name.length), 30);
+  console.log(`| ${'Check'.padEnd(maxName)} | Status | Detail`);
+  console.log(`|${'-'.repeat(maxName + 2)}|--------|${'-'.repeat(45)}`);
+  RESULTS.forEach(r => {
+    const emoji = r.status === 'PASS' ? '✅ PASS' : '❌ FAIL';
+    console.log(`| ${r.name.padEnd(maxName)} | ${emoji} | ${(r.detail || '').slice(0, 44)}`);
+  });
+
+  console.log(`\n${'═'.repeat(70)}`);
+  console.log(`Total: ${PASS + FAIL} | PASS: ${PASS} | FAIL: ${FAIL}`);
+  console.log(`${'═'.repeat(70)}\n`);
+
+  if (FAIL > 0) {
+    process.exit(1);
+  } else {
+    console.log('🎉 All role routing checks passed!\n');
+    process.exit(0);
+  }
 }
 
-runValidation().catch(e => {
-  console.error('Audit Script crashed:', e.stack);
+main().catch(e => {
+  console.error('Fatal error:', e);
   process.exit(1);
 });

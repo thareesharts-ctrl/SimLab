@@ -14,30 +14,19 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-// We dynamically import the better-auth password hasher at runtime.
-// It is an ESM module; we use a wrapper approach via require().
-import { createRequire } from 'module';
+// @ts-ignore
+import { hashPassword } from '@better-auth/utils/password';
 
 const prisma = new PrismaClient();
 
 // ─── Dynamic hash using better-auth crypto (same algorithm used by sign-in) ──────
 
 async function getBetterAuthHasher() {
-  // better-auth is ESM; dynamic import works here because ts-node has esm mode off
-  // We fall back to a Node.js crypto scrypt implementation matching the format
-  // better-auth uses: `${salt}:${derivedKey}` (hex:hex)
-  try {
-    const { createHash, randomBytes, scryptSync } = await import('crypto');
-    return {
-      hash: async (password: string): Promise<string> => {
-        const salt = randomBytes(16).toString('hex');
-        const key = scryptSync(password, salt, 64);
-        return `${salt}:${key.toString('hex')}`;
-      }
-    };
-  } catch {
-    throw new Error('Node.js crypto not available');
-  }
+  return {
+    hash: async (password: string): Promise<string> => {
+      return hashPassword(password);
+    }
+  };
 }
 
 // ─── Main Seed ────────────────────────────────────────────────────────────────
