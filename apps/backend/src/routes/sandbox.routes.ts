@@ -28,16 +28,24 @@ export async function sandboxRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', requireAuth);
 
   const checkRole = (request: AuthenticatedRequest): boolean => {
-    const role = request.user!.role;
-    if (role === 'STUDENT_COLLEGE') {
-      throw new ForbiddenError('Students must use their classroom-assigned simulation. Sandbox mode is not available for this account.');
+    const role = (request.user!.role || '').toUpperCase();
+
+    // Students must use their classroom simulation — never the personal sandbox
+    if (role === 'STUDENT_COLLEGE' || role === 'STUDENT') {
+      throw new ForbiddenError('Students must use assigned classroom simulation. Personal sandbox is not available.');
     }
+
+    // Instructors use the Instructor Portal — not the personal sandbox
     if (role === 'INSTRUCTOR') {
-      throw new ForbiddenError('Instructors must use the Instructor Portal for scenario preview and classroom simulations.');
+      throw new ForbiddenError('Instructors must use Instructor Scenario Preview or Instructor Portal, not personal sandbox.');
     }
-    if (role !== 'INDIVIDUAL' && role !== 'ADMIN') {
+
+    // Allow: INDIVIDUAL or LEARNER (alias) or ADMIN (super admin)
+    const isSandboxAllowed = role === 'INDIVIDUAL' || role === 'LEARNER' || role === 'ADMIN';
+    if (!isSandboxAllowed) {
       throw new ForbiddenError('Only Individual Learners or Administrators can access sandbox mode.');
     }
+
     return true;
   };
 
@@ -148,10 +156,10 @@ export async function sandboxRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/sample-scenarios', async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
-    const role = authReq.user!.role;
+    const role = (authReq.user!.role || '').toUpperCase();
 
     // Return empty safe list for students — never 403 on read endpoints
-    if (role === 'STUDENT_COLLEGE') {
+    if (role === 'STUDENT_COLLEGE' || role === 'STUDENT') {
       return reply.status(200).send({
         success: true,
         mode: (request.query as any).mode || 'GOOGLE_ADS',
@@ -447,11 +455,11 @@ export async function sandboxRoutes(fastify: FastifyInstance) {
    */
   fastify.get('/state', async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
-    const role = authReq.user!.role;
+    const role = (authReq.user!.role || '').toUpperCase();
 
     // Return a safe empty state for students rather than 403
     // (students should never reach this via the fixed frontend, but handle gracefully in case)
-    if (role === 'STUDENT_COLLEGE') {
+    if (role === 'STUDENT_COLLEGE' || role === 'STUDENT') {
       return reply.status(200).send({
         success: true,
         hasState: false,

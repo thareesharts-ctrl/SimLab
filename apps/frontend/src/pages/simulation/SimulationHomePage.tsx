@@ -182,13 +182,20 @@ export function SimulationHomePage() {
     }
   }
 
-  // Reload presets if mode changes
+  // Reload presets if mode changes — only for sandbox-eligible roles
   useEffect(() => {
-    loadSampleScenarios(selectedMode)
-  }, [selectedMode])
+    const normalized = normalizeRole(user?.role);
+    if (normalized === 'INDIVIDUAL' || normalized === 'SUPER_ADMIN') {
+      loadSampleScenarios(selectedMode);
+    }
+  }, [selectedMode, user?.role])
 
   useEffect(() => {
     const normalized = normalizeRole(user?.role);
+
+    // If user not yet loaded — wait for next render (fetchMe still in progress)
+    if (!user) return;
+
     // STUDENT must use classroom simulation — do NOT call sandbox APIs
     if (normalized === 'STUDENT') {
       navigate("/dashboard", { replace: true });
@@ -200,8 +207,10 @@ export function SimulationHomePage() {
       return;
     }
     // Only INDIVIDUAL and SUPER_ADMIN load sandbox state
-    loadData();
-  }, []);
+    if (normalized === 'INDIVIDUAL' || normalized === 'SUPER_ADMIN') {
+      loadData();
+    }
+  }, [user?.id]);
 
   if (loading) {
     return (

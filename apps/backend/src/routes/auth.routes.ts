@@ -27,6 +27,8 @@ export async function authRoutes(fastify: FastifyInstance) {
             email: { type: 'string' },
             name: { type: 'string' },
             role: { type: 'string' },
+            status: { type: 'string', nullable: true },
+            classId: { type: 'string', nullable: true },
             institution: { type: 'string', nullable: true },
             planType: { type: 'string', nullable: true }
           }
@@ -46,11 +48,24 @@ export async function authRoutes(fastify: FastifyInstance) {
   }, async (request, reply) => {
     const authReq = request as AuthenticatedRequest;
     const user = authReq.user!;
+
+    // Dev-only role routing diagnostic log
+    if (process.env.NODE_ENV !== 'production') {
+      console.info('[SimLab /me]', {
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        classId: user.classId || null,
+      });
+    }
+
     return reply.status(200).send({
       id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status || 'active',
+      classId: user.classId || null,
       institution: user.institution || null,
       planType: user.planType || null,
     });
