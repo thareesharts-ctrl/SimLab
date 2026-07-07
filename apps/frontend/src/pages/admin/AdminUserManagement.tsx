@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { Link } from "react-router"
 import { toast } from "sonner"
+import { normalizeRole } from "@/lib/normalizeRole"
 
 export function AdminUserManagement() {
   const {
@@ -61,11 +62,12 @@ export function AdminUserManagement() {
       user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (user.institution || "").toLowerCase().includes(searchQuery.toLowerCase())
 
+    const normalizedUserRole = normalizeRole(user.role)
     const matchesRole =
       roleFilter === "all" ||
-      (roleFilter === "student" && user.role === "student") ||
-      (roleFilter === "instructor" && user.role === "instructor") ||
-      (roleFilter === "admin" && user.role === "admin")
+      (roleFilter === "student" && normalizedUserRole === "STUDENT") ||
+      (roleFilter === "instructor" && normalizedUserRole === "INSTRUCTOR") ||
+      (roleFilter === "admin" && normalizedUserRole === "SUPER_ADMIN")
 
     const matchesStatus =
       statusFilter === "all" || user.status === statusFilter
@@ -376,7 +378,12 @@ export function AdminUserManagement() {
                     </td>
                     <td className="py-3 px-2">
                       <select
-                        value={user.role}
+                        value={(() => {
+                          const norm = normalizeRole(user.role);
+                          if (norm === 'SUPER_ADMIN') return 'admin';
+                          if (norm === 'INSTRUCTOR') return 'instructor';
+                          return 'student';
+                        })()}
                         onChange={(e) => handleRoleChange(user.id, e.target.value as any)}
                         className="bg-transparent border-none text-neutral-800 text-xs font-bold focus:ring-0 outline-none p-0 cursor-pointer"
                       >

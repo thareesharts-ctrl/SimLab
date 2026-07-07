@@ -72,7 +72,7 @@ export function SeoSimulationPage() {
   const { activeSimulation, saveDecisions } = useSimulationStore()
   const { user } = useAuthStore()
 
-  const isReadOnly = user?.role === 'admin' || activeSimulation?.status === 'LOCKED' || activeSimulation?.status === 'COMPLETED'
+  const isReadOnly = normalizeRole(user?.role) === 'SUPER_ADMIN' || activeSimulation?.status === 'LOCKED' || activeSimulation?.status === 'COMPLETED'
   const [isSaving, setIsSaving] = useState(false)
 
   // ── On-Page States ─────────────────────────────────────────────────────────

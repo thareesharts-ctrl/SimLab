@@ -11,6 +11,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
 import { School, User, Mail, Lock, ArrowLeft, ArrowRight } from "lucide-react"
+import { normalizeRole } from "@/lib/normalizeRole"
 
 const loginSchema = z.object({
   university: z.string().optional(),
@@ -37,7 +38,8 @@ export function InstructorLogin() {
   // Redirect if already logged in
   useEffect(() => {
     if (isAuthenticated) {
-      if (user?.role === "instructor" || user?.role === "admin") {
+      const normRole = normalizeRole(user?.role)
+      if (normRole === "INSTRUCTOR" || normRole === "SUPER_ADMIN") {
         navigate("/instructor", { replace: true })
       } else {
         navigate("/", { replace: true })
@@ -57,7 +59,8 @@ export function InstructorLogin() {
     setIsLoading(true)
     try {
       const loggedUser = await login(data.email, data.password)
-      if (loggedUser.role !== "instructor" && loggedUser.role !== "admin") {
+      const normRole = normalizeRole(loggedUser.role)
+      if (normRole !== "INSTRUCTOR" && normRole !== "SUPER_ADMIN") {
         await logout()
         toast.error("Access denied: Student accounts cannot sign in here.")
         return

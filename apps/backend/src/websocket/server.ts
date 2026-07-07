@@ -22,6 +22,12 @@ function extractToken(socket: Socket): string | null {
   if (typeof handshakeAuth?.token === 'string') {
     return handshakeAuth.token;
   }
+  // Cookie fallback
+  const cookieHeader = socket.handshake.headers?.cookie || '';
+  const tokenMatch = cookieHeader.match(/simlab\.session_token=([^;]+)/) || cookieHeader.match(/better-auth\.session_token=([^;]+)/);
+  if (tokenMatch) {
+    return tokenMatch[1].trim();
+  }
   return null;
 }
 
@@ -119,6 +125,7 @@ export async function initSocketServer(server: HttpServer): Promise<void> {
       const token = extractToken(socket);
 
       let userId: string | null = null;
+      let userRole: string | null = null;
 
       if (token) {
         try {
@@ -128,9 +135,20 @@ export async function initSocketServer(server: HttpServer): Promise<void> {
           });
           if (sessionResponse?.user?.id) {
             userId = sessionResponse.user.id;
+            
+            const prismaClient = (await import('../db/client')).prisma;
+            const dbUser = await prismaClient.user.findUnique({
+              where: { id: userId },
+              select: { role: true }
+            });
+            if (dbUser) {
+              const { normalizeRole } = await import('../auth/roles');
+              userRole = normalizeRole(dbUser.role);
+            }
+
             // Auto-join personal user room
             socket.join(`user:${userId}`);
-            logger.info({ socketId: socket.id, userId }, 'Authenticated socket joined user room.');
+            logger.info({ socketId: socket.id, userId, userRole }, 'Authenticated socket joined user room.');
           }
         } catch {
           // Not a fatal error — socket stays connected but unauthenticated
@@ -168,6 +186,16 @@ export async function initSocketServer(server: HttpServer): Promise<void> {
 
       socket.on('join-instructor', async (instructorId: string) => {
         if (!instructorId) return;
+
+        // Authorize: userRole must be INSTRUCTOR or ADMIN, and userId must match instructorId (unless admin)
+        const { UserRole } = await import('../auth/roles');
+        const isAuthorized = userRole === UserRole.ADMIN || (userRole === UserRole.INSTRUCTOR && userId === instructorId);
+
+        if (!isAuthorized) {
+          logger.warn({ socketId: socket.id, userId, userRole, instructorId }, 'Unauthorized attempt to join instructor rooms.');
+          return;
+        }
+
         socket.join(`instructor:${instructorId}`);
         try {
           const prismaClient = (await import('../db/client')).prisma;

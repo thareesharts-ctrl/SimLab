@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { auth } from './better-auth';
-import { UserRole } from './roles';
+import { UserRole, normalizeRole } from './roles';
 import { prisma } from '../db/client';
 import { cacheService } from '../utils/caching';
 
@@ -86,7 +86,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
       id: dbUser.id,
       email: dbUser.email,
       name: dbUser.name,
-      role: dbUser.role || 'STUDENT_COLLEGE',
+      role: normalizeRole(dbUser.role),
       classId: verifiedClassId,
       institution: dbUser.institution || null,
       planType: dbUser.planType || null,
@@ -112,7 +112,7 @@ export function requireRole(allowedRoles: UserRole[]) {
     if (reply.sent) return;
 
     const authReq = req as AuthenticatedRequest;
-    if (!authReq.user || !allowedRoles.includes(authReq.user.role as UserRole)) {
+    if (!authReq.user || !allowedRoles.includes(normalizeRole(authReq.user.role))) {
       reply.status(403).header('content-type', 'application/json; charset=utf-8').send(JSON.stringify({
         error: 'Forbidden: Insufficient permissions'
       }));

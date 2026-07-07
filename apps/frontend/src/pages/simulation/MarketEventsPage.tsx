@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import api from "@/lib/api"
 import { useAuthStore } from "@/stores/authStore"
 import { useInstructorPortalStore } from "@/stores/instructorPortalStore"
+import { normalizeRole } from "@/lib/normalizeRole"
 import {
   Calendar,
   AlertTriangle,
@@ -35,7 +36,7 @@ export function MarketEventsPage() {
   const [error, setError] = useState<string | null>(null)
   const [backendMessage, setBackendMessage] = useState<string | null>(null)
 
-  const isInstructor = user?.role === "instructor" || user?.role === "admin"
+  const isInstructor = normalizeRole(user?.role) === "INSTRUCTOR" || normalizeRole(user?.role) === "SUPER_ADMIN"
 
   const fetchEvents = async () => {
     if (isInstructor && !selectedClassId) {

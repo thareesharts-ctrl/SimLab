@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useBillingStore } from "@/stores/billingStore";
 import { useAuthStore } from "@/stores/authStore";
+import { normalizeRole } from "@/lib/normalizeRole";
 import { exportToCSV, generatePDF } from "@/lib/exportUtils";
 import {
   ResponsiveContainer,
@@ -81,7 +82,7 @@ export function AdminBillingCenter() {
   const [loadingSubscriptions, setLoadingSubscriptions] = useState<boolean>(false);
 
   useEffect(() => {
-    if (user?.role === "admin") {
+    if (normalizeRole(user?.role) === "SUPER_ADMIN") {
       fetchAdminBillingData();
       fetchCoupons();
       fetchPlans();
@@ -89,7 +90,7 @@ export function AdminBillingCenter() {
   }, [fetchAdminBillingData, fetchCoupons, fetchPlans, user]);
 
   useEffect(() => {
-    if (user?.role === "admin" && activeTab === "reports") {
+    if (normalizeRole(user?.role) === "SUPER_ADMIN" && activeTab === "reports") {
       const load = async () => {
         setLoadingSubscriptions(true);
         try {
@@ -203,7 +204,7 @@ export function AdminBillingCenter() {
     }
   };
 
-  if (user?.role !== "admin") {
+  if (normalizeRole(user?.role) !== "SUPER_ADMIN") {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
         You do not have permission to access the Administrative Billing Dashboard.

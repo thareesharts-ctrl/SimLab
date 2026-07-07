@@ -68,6 +68,7 @@ import { SubscriptionDashboard } from "@/pages/billing/SubscriptionDashboard"
 import { InvoiceCenter } from "@/pages/billing/InvoiceCenter"
 import { AdminBillingCenter } from "@/pages/admin/AdminBillingCenter"
 import { normalizeRole } from "@/lib/normalizeRole"
+import { RefreshCw } from "lucide-react"
 
 // ─── Layout Guards ────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ import { normalizeRole } from "@/lib/normalizeRole"
  * Handles pending/blocked student status screens.
  */
 function ProtectedLayout() {
-  const { isAuthenticated, user, fetchMe } = useAuthStore()
+  const { isAuthenticated, user, fetchMe, loading } = useAuthStore()
 
   useEffect(() => {
     fetchMe()
@@ -84,6 +85,15 @@ function ProtectedLayout() {
 
   if (!isAuthenticated) {
     return <Navigate to="/landing" replace />
+  }
+
+  if (loading && !user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 bg-white">
+        <RefreshCw className="h-10 w-10 text-indigo-650 animate-spin" />
+        <span className="text-sm text-neutral-500 font-bold">Loading dashboard profile...</span>
+      </div>
+    )
   }
 
   // Student status guards
@@ -103,8 +113,17 @@ function ProtectedLayout() {
  * InstructorLayout — only INSTRUCTOR or ADMIN roles may access these routes.
  */
 function InstructorLayout() {
-  const { user } = useAuthStore()
+  const { user, loading } = useAuthStore()
   const normalized = normalizeRole(user?.role)
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 bg-white">
+        <RefreshCw className="h-10 w-10 text-indigo-650 animate-spin" />
+        <span className="text-sm text-neutral-500 font-bold">Verifying credentials...</span>
+      </div>
+    )
+  }
 
   if (user && normalized !== 'INSTRUCTOR' && normalized !== 'SUPER_ADMIN') {
     return <Navigate to="/" replace />
@@ -117,8 +136,17 @@ function InstructorLayout() {
  * AdminLayout — only ADMIN/SUPER_ADMIN roles may access these routes.
  */
 function AdminLayout() {
-  const { user } = useAuthStore()
+  const { user, loading } = useAuthStore()
   const normalized = normalizeRole(user?.role)
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 bg-white">
+        <RefreshCw className="h-10 w-10 text-indigo-650 animate-spin" />
+        <span className="text-sm text-neutral-500 font-bold">Verifying administrator credentials...</span>
+      </div>
+    )
+  }
 
   if (user && normalized !== 'SUPER_ADMIN') {
     return <Navigate to="/" replace />
@@ -138,8 +166,17 @@ function AdminLayout() {
  * before the role check can complete.
  */
 function SandboxGuard() {
-  const { user } = useAuthStore()
+  const { user, loading } = useAuthStore()
   const normalized = normalizeRole(user?.role)
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 bg-white">
+        <RefreshCw className="h-10 w-10 text-indigo-650 animate-spin" />
+        <span className="text-sm text-neutral-500 font-bold">Loading simulation workspace...</span>
+      </div>
+    )
+  }
 
   if (normalized === 'STUDENT') {
     return <Navigate to="/dashboard" replace />

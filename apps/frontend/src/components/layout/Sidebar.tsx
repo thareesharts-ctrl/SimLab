@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils"
 import { useUiStore } from "@/stores/uiStore"
 import { useAuthStore } from "@/stores/authStore"
 import { useState, useEffect } from "react"
+import { normalizeRole } from "@/lib/normalizeRole"
 import {
   Tooltip,
   TooltipContent,
@@ -72,7 +73,7 @@ const navConfig: NavGroup[] = [
   },
   {
     groupName: "Instructor Panel",
-    role: "instructor",
+    role: "INSTRUCTOR",
     items: [
       { name: "Classrooms", href: "/instructor", icon: GraduationCap },
       { name: "Scenario Builder", href: "/instructor/scenarios", icon: FileBarChart },
@@ -95,7 +96,7 @@ const navConfig: NavGroup[] = [
   },
   {
     groupName: "Admin Console",
-    role: "admin",
+    role: "SUPER_ADMIN",
     items: [
       { name: "Admin Dashboard", href: "/admin", icon: LayoutDashboard },
       { name: "User Management", href: "/admin/users", icon: Users },
@@ -118,7 +119,7 @@ export function Sidebar({ className }: SidebarProps) {
   const location = useLocation()
   const { sidebarCollapsed, toggleSidebar } = useUiStore()
   const { user } = useAuthStore()
-  const userRole = user?.role || "individual"
+  const userRole = normalizeRole(user?.role) || "INDIVIDUAL"
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
     "Simulation Sandbox": true
   })
@@ -133,7 +134,7 @@ export function Sidebar({ className }: SidebarProps) {
   // Filter groups by role
   const visibleGroups = navConfig.filter(group => {
     if (group.role && group.role !== userRole) return false
-    if (userRole === "instructor") {
+    if (userRole === "INSTRUCTOR") {
       if (["Dashboard", "Simulation Lab", "Billing"].includes(group.groupName)) {
         return false
       }

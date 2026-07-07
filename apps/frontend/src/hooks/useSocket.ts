@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
 import { useSimulationStore } from '../stores/simulationStore';
 import { config } from '../lib/config';
+import { normalizeRole } from '../lib/normalizeRole';
 
 // Native AudioContext beep generator to play a subtle sound without external MP3 files
 function playNotificationSound() {
@@ -33,7 +34,7 @@ function playNotificationSound() {
 
 export function useSocket() {
   const socketRef = useRef<Socket | null>(null);
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, loading } = useAuthStore();
   const {
     activeSimulation,
     fetchLatestState,
@@ -47,7 +48,7 @@ export function useSocket() {
   const userId = user?.id;
 
   useEffect(() => {
-    if (!isAuthenticated || !userId) {
+    if (loading || !isAuthenticated || !userId) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -76,6 +77,13 @@ export function useSocket() {
       // Join active simulation observer channel
       if (simulationId) {
         socket.emit('join-simulation', simulationId);
+      }
+
+      // Join instructor channel if role matches
+      const userRole = normalizeRole(user?.role);
+      if (userRole === 'INSTRUCTOR') {
+        console.log(`🔌 Joining instructor room: instructor:${userId}`);
+        socket.emit('join-instructor', userId);
       }
     });
 
@@ -135,7 +143,7 @@ export function useSocket() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [isAuthenticated, userId, simulationId, fetchMetrics, fetchSnapshots, setStatus]);
+  }, [isAuthenticated, userId, user?.role, loading, simulationId, fetchMetrics, fetchSnapshots, setStatus]);
 
   return socketRef.current;
 }

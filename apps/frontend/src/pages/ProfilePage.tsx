@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router"
 import { useAuthStore } from "@/stores/authStore"
+import { normalizeRole } from "@/lib/normalizeRole"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
@@ -149,7 +150,7 @@ export function ProfilePage() {
                     value={profileEmail}
                     onChange={(e) => setProfileEmail(e.target.value)}
                     className="pl-9 h-10 text-xs border-neutral-200 bg-white disabled:bg-neutral-50 disabled:text-neutral-500 disabled:cursor-not-allowed"
-                    disabled={isSaving || user?.role === "instructor"}
+                    disabled={isSaving || normalizeRole(user?.role) === "INSTRUCTOR"}
                     required
                   />
                 </div>

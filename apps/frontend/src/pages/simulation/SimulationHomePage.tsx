@@ -126,7 +126,7 @@ export function SimulationHomePage() {
     setIsInitializingPath(true)
     const tid = toast.loading(`Starting ${selectedMode} simulation...`)
     try {
-      const isAdmin = user?.role === "admin";
+      const isAdmin = normalizeRole(user?.role) === "SUPER_ADMIN";
       
       const payload: any = {
         simulationMode: selectedMode,
