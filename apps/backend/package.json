@@ -19,7 +19,9 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "ts-node src/seed/master-seed.ts",
     "pilot:seed": "ts-node --transpile-only src/seed/pilot-seed.ts",
-    "verify:prod-db": "ts-node scripts/verify-prod-db.ts"
+    "verify:prod-db": "ts-node scripts/verify-prod-db.ts",
+    "verify:demo-accounts": "ts-node --transpile-only src/scripts/verify-demo-accounts.ts",
+    "verify:demo-logins": "ts-node --transpile-only src/scripts/verify-demo-logins.ts"
   },
   "dependencies": {
     "@better-auth/core": "^1.6.14",

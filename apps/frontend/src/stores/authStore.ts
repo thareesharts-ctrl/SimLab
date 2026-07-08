@@ -23,20 +23,16 @@ interface AuthState {
  * Clear these on login/logout to prevent stale state from a previous session
  * (e.g., a student store persisted under an individual's session).
  */
-const ROLE_SCOPED_PERSIST_KEYS = [
-  'simplab-simulation-storage',
-  'simplab-campaign-storage',
-  'simplab-instructor-storage',
-  'simplab-results-storage',
-  'simplab-leaderboard-storage',
-  'simplab-metrics-storage',
-];
-
 function clearRoleScopedStorage() {
   try {
-    ROLE_SCOPED_PERSIST_KEYS.forEach(key => {
-      localStorage.removeItem(key);
-    });
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('simplab-') || key.startsWith('better-auth'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
   } catch (_) {
     // localStorage may be unavailable in some environments
   }

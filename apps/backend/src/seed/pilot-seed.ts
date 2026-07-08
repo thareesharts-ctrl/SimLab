@@ -14,19 +14,30 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-// @ts-ignore
-import { hashPassword } from '@better-auth/utils/password';
+import { hashPassword } from 'better-auth/crypto';
 
 const prisma = new PrismaClient();
 
-// ─── Dynamic hash using better-auth crypto (same algorithm used by sign-in) ──────
-
-async function getBetterAuthHasher() {
-  return {
-    hash: async (password: string): Promise<string> => {
-      return hashPassword(password);
-    }
-  };
+// Re-run safe Account upsert helper to prevent duplicate Account records
+async function upsertAccount(userId: string, email: string, passwordHash: string) {
+  const existing = await prisma.account.findFirst({
+    where: { userId, providerId: 'credential' }
+  });
+  if (existing) {
+    await prisma.account.update({
+      where: { id: existing.id },
+      data: { password: passwordHash, accountId: email }
+    });
+  } else {
+    await prisma.account.create({
+      data: {
+        userId,
+        accountId: email,
+        providerId: 'credential',
+        password: passwordHash
+      }
+    });
+  }
 }
 
 // ─── Main Seed ────────────────────────────────────────────────────────────────
@@ -34,11 +45,9 @@ async function getBetterAuthHasher() {
 async function main() {
   console.log('\n🌱 Starting Pilot Seed — SimLab Demo Accounts...\n');
 
-  const hasher = await getBetterAuthHasher();
-
   // ── Pre-generate password hash (all accounts share same password Test@123456) ──
   const DEMO_PASSWORD = 'Test@123456';
-  const PASSWORD_HASH = await hasher.hash(DEMO_PASSWORD);
+  const PASSWORD_HASH = await hashPassword(DEMO_PASSWORD);
   console.log(`✅ Password hash generated for: ${DEMO_PASSWORD}`);
 
   // ── Plans ─────────────────────────────────────────────────────────────────────
@@ -249,17 +258,7 @@ async function main() {
       status: 'active',
     }
   });
-  await prisma.account.upsert({
-    where: { id: `acc-${superAdmin.id}` },
-    update: { password: PASSWORD_HASH },
-    create: {
-      id: `acc-${superAdmin.id}`,
-      userId: superAdmin.id,
-      accountId: 'superadmin@simlab.run',
-      providerId: 'credential',
-      password: PASSWORD_HASH,
-    }
-  });
+  await upsertAccount(superAdmin.id, 'superadmin@simlab.run', PASSWORD_HASH);
   console.log(`  ✅ superadmin@simlab.run [ADMIN] id=${superAdmin.id}`);
 
   // ── Instructors ───────────────────────────────────────────────────────────────
@@ -276,17 +275,7 @@ async function main() {
       status: 'active',
     }
   });
-  await prisma.account.upsert({
-    where: { id: `acc-${instrAlpha.id}` },
-    update: { password: PASSWORD_HASH },
-    create: {
-      id: `acc-${instrAlpha.id}`,
-      userId: instrAlpha.id,
-      accountId: 'instructor.alpha@simlab.run',
-      providerId: 'credential',
-      password: PASSWORD_HASH,
-    }
-  });
+  await upsertAccount(instrAlpha.id, 'instructor.alpha@simlab.run', PASSWORD_HASH);
 
   const instrBeta = await prisma.user.upsert({
     where: { email: 'instructor.beta@simlab.run' },
@@ -300,17 +289,7 @@ async function main() {
       status: 'active',
     }
   });
-  await prisma.account.upsert({
-    where: { id: `acc-${instrBeta.id}` },
-    update: { password: PASSWORD_HASH },
-    create: {
-      id: `acc-${instrBeta.id}`,
-      userId: instrBeta.id,
-      accountId: 'instructor.beta@simlab.run',
-      providerId: 'credential',
-      password: PASSWORD_HASH,
-    }
-  });
+  await upsertAccount(instrBeta.id, 'instructor.beta@simlab.run', PASSWORD_HASH);
   console.log(`  ✅ instructor.alpha@simlab.run [INSTRUCTOR] id=${instrAlpha.id}`);
   console.log(`  ✅ instructor.beta@simlab.run  [INSTRUCTOR] id=${instrBeta.id}`);
 
@@ -413,17 +392,7 @@ async function main() {
       }
     });
 
-    await prisma.account.upsert({
-      where: { id: `acc-${student.id}` },
-      update: { password: PASSWORD_HASH },
-      create: {
-        id: `acc-${student.id}`,
-        userId: student.id,
-        accountId: s.email,
-        providerId: 'credential',
-        password: PASSWORD_HASH,
-      }
-    });
+    await upsertAccount(student.id, s.email, PASSWORD_HASH);
 
     // Upsert ClassEnrollment as ACTIVE
     const existingEnroll = await prisma.classEnrollment.findFirst({
@@ -497,17 +466,7 @@ async function main() {
     }
   });
 
-  await prisma.account.upsert({
-    where: { id: `acc-${learner.id}` },
-    update: { password: PASSWORD_HASH },
-    create: {
-      id: `acc-${learner.id}`,
-      userId: learner.id,
-      accountId: 'learner@simlab.run',
-      providerId: 'credential',
-      password: PASSWORD_HASH,
-    }
-  });
+  await upsertAccount(learner.id, 'learner@simlab.run', PASSWORD_HASH);
 
   // Individual learner gets a pro subscription for the pilot
   const proPlan = await prisma.plan.findUnique({ where: { code: 'individual_pro' } });

@@ -783,12 +783,41 @@ app.all('/api/auth/*', {
   });
 
   const webResponse = await auth.handler(webRequest);
+  const responseText = await webResponse.text();
 
   if (isSignIn && email) {
     if (webResponse.status >= 200 && webResponse.status < 300) {
+      try {
+        const bodyObj = JSON.parse(responseText);
+        const userId = bodyObj.user?.id;
+        if (userId) {
+          const dbUser = await prisma.user.findUnique({ where: { id: userId } });
+          if (dbUser && dbUser.status && dbUser.status !== 'active') {
+            reply.status(403);
+            return reply.send({
+              success: false,
+              error: `Your account is currently ${dbUser.status}.`,
+              message: `Your account is currently ${dbUser.status}.`,
+              code: 'ACCOUNT_INACTIVE',
+              statusCode: 403
+            });
+          }
+        }
+      } catch (err) {
+        // ignore parse error
+      }
       await bruteForceService.reset(email);
     } else if (webResponse.status === 401 || webResponse.status === 400) {
       await bruteForceService.handleFailedAttempt(email);
+
+      reply.status(401);
+      return reply.send({
+        success: false,
+        error: 'Invalid email or password. Please try again.',
+        message: 'Invalid email or password. Please try again.',
+        code: 'INVALID_CREDENTIALS',
+        statusCode: 401
+      });
     }
   }
 
@@ -805,7 +834,7 @@ app.all('/api/auth/*', {
   });
 
   reply.status(webResponse.status);
-  return reply.send(await webResponse.text());
+  return reply.send(responseText);
 });
 
 // GET /api/me profile endpoint (part of the frontend API contract)
@@ -831,6 +860,8 @@ app.get('/api/me', {
           email: { type: 'string' },
           name: { type: 'string' },
           role: { type: 'string' },
+          status: { type: 'string', nullable: true },
+          classId: { type: 'string', nullable: true },
           institution: { type: 'string', nullable: true },
           planType: { type: 'string', nullable: true }
         }
@@ -852,6 +883,8 @@ app.get('/api/me', {
     email: user.email,
     name: user.name,
     role: user.role,
+    status: user.status || 'active',
+    classId: user.classId || null,
     institution: user.institution || null,
     planType: user.planType || null,
   });
